@@ -9,12 +9,12 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 
-	"github.com/tldr-it-stepankutaj/pentakit/app"
-	"github.com/tldr-it-stepankutaj/pentakit/modules"
-	"github.com/tldr-it-stepankutaj/pentakit/modules/recon"
+	"github.com/tldr-it-stepankutaj/pentakit/internal/app"
+	"github.com/tldr-it-stepankutaj/pentakit/internal/modules"
+	"github.com/tldr-it-stepankutaj/pentakit/internal/modules/recon"
+	"github.com/tldr-it-stepankutaj/pentakit/internal/tui"
+	"github.com/tldr-it-stepankutaj/pentakit/internal/workspace"
 	"github.com/tldr-it-stepankutaj/pentakit/pkg/version"
-	"github.com/tldr-it-stepankutaj/pentakit/tui"
-	"github.com/tldr-it-stepankutaj/pentakit/workspace"
 )
 
 var rootCmd = &cobra.Command{

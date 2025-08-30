@@ -1,0 +1,11 @@
+# Pentest Report
+
+Date: {{ .Date }}
+Workspace: {{ .Workspace }}
+
+## Findings
+{{ range .Findings }}
+- Target: {{ .Target }} Port: {{ .Port }} Evidence: {{ .Evidence }}
+{{ else }}
+No findings.
+{{ end }}
