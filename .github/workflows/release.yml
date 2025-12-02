@@ -1,0 +1,382 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    name: Validate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache: true
+
+      - name: Verify dependencies
+        run: go mod verify
+
+      - name: Run go vet
+        run: go vet ./...
+
+      - name: Run staticcheck
+        uses: dominikh/staticcheck-action@v1
+        with:
+          version: "latest"
+          install-go: false
+
+      - name: Run tests
+        run: go test -race -coverprofile=coverage.out -covermode=atomic ./...
+
+      - name: Upload coverage
+        uses: codecov/codecov-action@v4
+        with:
+          files: ./coverage.out
+          fail_ci_if_error: false
+
+  build:
+    name: Build
+    needs: validate
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+            suffix: linux-amd64
+          - goos: linux
+            goarch: arm64
+            suffix: linux-arm64
+          - goos: darwin
+            goarch: amd64
+            suffix: darwin-amd64
+          - goos: darwin
+            goarch: arm64
+            suffix: darwin-arm64
+          - goos: windows
+            goarch: amd64
+            suffix: windows-amd64.exe
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache: true
+
+      - name: Get version from tag
+        id: version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+      - name: Build binary
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: 0
+        run: |
+          go build -ldflags="-s -w -X github.com/tldr-it-stepankutaj/pentakit/pkg/version.Version=${{ steps.version.outputs.VERSION }}" \
+            -o pentakit-${{ matrix.suffix }} ./cmd/main
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pentakit-${{ matrix.suffix }}
+          path: pentakit-${{ matrix.suffix }}
+
+  package-deb:
+    name: Package DEB
+    needs: build
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        arch: [amd64, arm64]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Get version from tag
+        id: version
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+          echo "TAG=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+      - name: Download binary
+        uses: actions/download-artifact@v4
+        with:
+          name: pentakit-linux-${{ matrix.arch }}
+          path: .
+
+      - name: Build DEB package
+        run: |
+          VERSION=${{ steps.version.outputs.VERSION }}
+          ARCH=${{ matrix.arch }}
+          PKG_NAME=pentakit_${VERSION}_${ARCH}
+
+          # Create package structure
+          mkdir -p ${PKG_NAME}/DEBIAN
+          mkdir -p ${PKG_NAME}/usr/bin
+          mkdir -p ${PKG_NAME}/usr/share/doc/pentakit
+          mkdir -p ${PKG_NAME}/usr/share/man/man1
+
+          # Copy binary
+          cp pentakit-linux-${ARCH} ${PKG_NAME}/usr/bin/pentakit
+          chmod 755 ${PKG_NAME}/usr/bin/pentakit
+
+          # Create control file
+          cat > ${PKG_NAME}/DEBIAN/control << EOF
+          Package: pentakit
+          Version: ${VERSION}
+          Section: security
+          Priority: optional
+          Architecture: ${ARCH}
+          Maintainer: TLDR-IT <info@tldr-it.com>
+          Description: Extensible Go-based penetration testing toolkit
+           Pentakit provides a modular CLI and TUI for automated pentest workflows
+           including reconnaissance, enumeration, vulnerability scanning, and
+           evidence collection.
+          Homepage: https://github.com/tldr-it-stepankutaj/pentakit
+          EOF
+
+          # Create copyright file
+          cat > ${PKG_NAME}/usr/share/doc/pentakit/copyright << EOF
+          Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+          Upstream-Name: pentakit
+          Source: https://github.com/tldr-it-stepankutaj/pentakit
+
+          Files: *
+          Copyright: 2024 TLDR-IT
+          License: MIT
+          EOF
+
+          # Create changelog
+          cat > ${PKG_NAME}/usr/share/doc/pentakit/changelog.Debian << EOF
+          pentakit (${VERSION}) stable; urgency=medium
+
+            * Release ${VERSION}
+
+           -- TLDR-IT <info@tldr-it.com>  $(date -R)
+          EOF
+          gzip -9 ${PKG_NAME}/usr/share/doc/pentakit/changelog.Debian
+
+          # Build package
+          dpkg-deb --build ${PKG_NAME}
+
+          # Verify package
+          dpkg-deb --info ${PKG_NAME}.deb
+
+      - name: Upload DEB artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pentakit-deb-${{ matrix.arch }}
+          path: "*.deb"
+
+  package-rpm:
+    name: Package RPM
+    needs: build
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - arch: amd64
+            rpm_arch: x86_64
+          - arch: arm64
+            rpm_arch: aarch64
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install RPM tools
+        run: sudo apt-get update && sudo apt-get install -y rpm
+
+      - name: Get version from tag
+        id: version
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Download binary
+        uses: actions/download-artifact@v4
+        with:
+          name: pentakit-linux-${{ matrix.arch }}
+          path: .
+
+      - name: Build RPM package
+        run: |
+          VERSION=${{ steps.version.outputs.VERSION }}
+          ARCH=${{ matrix.arch }}
+          RPM_ARCH=${{ matrix.rpm_arch }}
+
+          # Setup RPM build directories
+          mkdir -p ~/rpmbuild/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
+
+          # Copy binary to SOURCES
+          cp pentakit-linux-${ARCH} ~/rpmbuild/SOURCES/pentakit
+
+          # Create spec file
+          cat > ~/rpmbuild/SPECS/pentakit.spec << 'EOF'
+          Name:           pentakit
+          Version:        ${{ steps.version.outputs.VERSION }}
+          Release:        1%{?dist}
+          Summary:        Extensible Go-based penetration testing toolkit
+          License:        MIT
+          URL:            https://github.com/tldr-it-stepankutaj/pentakit
+
+          %description
+          Pentakit provides a modular CLI and TUI for automated pentest workflows
+          including reconnaissance, enumeration, vulnerability scanning, and
+          evidence collection.
+
+          %install
+          mkdir -p %{buildroot}/usr/bin
+          install -m 755 %{_sourcedir}/pentakit %{buildroot}/usr/bin/pentakit
+
+          %files
+          /usr/bin/pentakit
+
+          %changelog
+          * $(date "+%a %b %d %Y") TLDR-IT <info@tldr-it.com> - ${{ steps.version.outputs.VERSION }}-1
+          - Release ${{ steps.version.outputs.VERSION }}
+          EOF
+
+          # Build RPM
+          rpmbuild -bb --target ${RPM_ARCH} ~/rpmbuild/SPECS/pentakit.spec
+
+          # Copy RPM to current directory
+          cp ~/rpmbuild/RPMS/${RPM_ARCH}/*.rpm ./pentakit-${VERSION}-1.${RPM_ARCH}.rpm
+
+      - name: Upload RPM artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pentakit-rpm-${{ matrix.arch }}
+          path: "*.rpm"
+
+  release:
+    name: Release
+    needs: [build, package-deb, package-rpm]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Prepare release files
+        run: |
+          mkdir -p release
+
+          # Copy binaries
+          for dir in artifacts/pentakit-linux-* artifacts/pentakit-darwin-* artifacts/pentakit-windows-*; do
+            if [ -d "$dir" ]; then
+              cp "$dir"/* release/ 2>/dev/null || true
+            fi
+          done
+
+          # Copy DEB packages
+          for dir in artifacts/pentakit-deb-*; do
+            if [ -d "$dir" ]; then
+              cp "$dir"/*.deb release/ 2>/dev/null || true
+            fi
+          done
+
+          # Copy RPM packages
+          for dir in artifacts/pentakit-rpm-*; do
+            if [ -d "$dir" ]; then
+              cp "$dir"/*.rpm release/ 2>/dev/null || true
+            fi
+          done
+
+          cd release
+          # Create checksums
+          sha256sum * > checksums.txt
+          ls -la
+
+      - name: Get version from tag
+        id: version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+      - name: Generate changelog
+        id: changelog
+        run: |
+          # Get commits since last tag
+          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+          if [ -n "$PREV_TAG" ]; then
+            CHANGELOG=$(git log --pretty=format:"- %s" $PREV_TAG..HEAD)
+          else
+            CHANGELOG=$(git log --pretty=format:"- %s" -20)
+          fi
+          echo "CHANGELOG<<EOF" >> $GITHUB_OUTPUT
+          echo "$CHANGELOG" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          name: Pentakit ${{ steps.version.outputs.VERSION }}
+          body: |
+            ## Pentakit ${{ steps.version.outputs.VERSION }}
+
+            ### Changes
+            ${{ steps.changelog.outputs.CHANGELOG }}
+
+            ### Installation
+
+            #### Binary Downloads
+            Download the appropriate binary for your platform:
+            - **Linux (AMD64)**: `pentakit-linux-amd64`
+            - **Linux (ARM64)**: `pentakit-linux-arm64`
+            - **macOS (Intel)**: `pentakit-darwin-amd64`
+            - **macOS (Apple Silicon)**: `pentakit-darwin-arm64`
+            - **Windows**: `pentakit-windows-amd64.exe`
+
+            ```bash
+            # Example for Linux/macOS
+            chmod +x pentakit-*
+            ./pentakit-linux-amd64 --help
+            ```
+
+            #### Debian/Ubuntu (DEB)
+            ```bash
+            # AMD64
+            sudo dpkg -i pentakit_*_amd64.deb
+
+            # ARM64
+            sudo dpkg -i pentakit_*_arm64.deb
+            ```
+
+            #### RHEL/CentOS/Fedora (RPM)
+            ```bash
+            # AMD64
+            sudo rpm -i pentakit-*-1.x86_64.rpm
+
+            # ARM64
+            sudo rpm -i pentakit-*-1.aarch64.rpm
+            ```
+
+            ### Verify checksums
+            ```bash
+            sha256sum -c checksums.txt
+            ```
+          files: |
+            release/*
+          draft: false
+          prerelease: ${{ contains(steps.version.outputs.VERSION, '-') }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
