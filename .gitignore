@@ -21,6 +21,10 @@ profile.cov
 # vendor/
 bin/
 work/
+
+# Built binaries
+pentakit
+pentakit-*
 # Go workspace file
 go.work
 go.work.sum
