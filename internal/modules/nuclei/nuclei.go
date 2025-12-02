@@ -250,7 +250,7 @@ func parseResults(filePath string) ([]Result, error) {
 		}
 		return nil, err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	var results []Result
 	scanner := bufio.NewScanner(file)
@@ -403,11 +403,13 @@ func WriteTargetsFile(path string, targets []string) error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	w := bufio.NewWriter(f)
 	for _, t := range targets {
-		fmt.Fprintln(w, t)
+		if _, err := fmt.Fprintln(w, t); err != nil {
+			return err
+		}
 	}
 	return w.Flush()
 }

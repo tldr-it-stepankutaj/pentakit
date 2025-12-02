@@ -552,7 +552,7 @@ func readJSONL[T any](path string) ([]T, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	var results []T
 	scanner := bufio.NewScanner(file)

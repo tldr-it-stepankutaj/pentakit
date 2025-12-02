@@ -235,17 +235,21 @@ func enumerateNetBIOS(target string, timeout time.Duration) *netbiosInfo {
 	if err != nil {
 		return nil
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	// NetBIOS Name Service query
 	query := buildNetBIOSQuery()
-	conn.SetWriteDeadline(time.Now().Add(timeout))
+	if err := conn.SetWriteDeadline(time.Now().Add(timeout)); err != nil {
+		return nil
+	}
 	_, err = conn.Write(query)
 	if err != nil {
 		return nil
 	}
 
-	conn.SetReadDeadline(time.Now().Add(timeout))
+	if err := conn.SetReadDeadline(time.Now().Add(timeout)); err != nil {
+		return nil
+	}
 	buf := make([]byte, 1024)
 	n, err := conn.Read(buf)
 	if err != nil {
@@ -375,14 +379,16 @@ type smbInfo struct {
 }
 
 func probeSMB(target string, port int, timeout time.Duration) (*smbInfo, error) {
-	addr := fmt.Sprintf("%s:%d", target, port)
+	addr := net.JoinHostPort(target, fmt.Sprintf("%d", port))
 	conn, err := net.DialTimeout("tcp", addr, timeout)
 	if err != nil {
 		return nil, err
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
-	conn.SetDeadline(time.Now().Add(timeout))
+	if err := conn.SetDeadline(time.Now().Add(timeout)); err != nil {
+		return nil, err
+	}
 
 	// Send SMB2 negotiate request
 	negReq := buildSMB2NegotiateRequest()
@@ -403,7 +409,6 @@ func probeSMB(target string, port int, timeout time.Duration) (*smbInfo, error) 
 
 func buildSMB2NegotiateRequest() []byte {
 	// NetBIOS session header + SMB2 negotiate request
-	packet := make([]byte, 0, 256)
 
 	// SMB2 header
 	smb2Header := make([]byte, 64)
@@ -449,7 +454,7 @@ func buildSMB2NegotiateRequest() []byte {
 	binary.BigEndian.PutUint32(nbHeader[0:4], uint32(len(smbPacket)))
 	nbHeader[0] = 0x00 // Fix first byte
 
-	packet = append(nbHeader, smbPacket...)
+	packet := append(nbHeader, smbPacket...)
 	return packet
 }
 
@@ -499,12 +504,12 @@ func parseSMB2NegotiateResponse(data []byte) (*smbInfo, error) {
 func testNullSession(target string, port int, timeout time.Duration) bool {
 	// Simplified null session test
 	// Full implementation would complete SMB session setup with empty credentials
-	addr := fmt.Sprintf("%s:%d", target, port)
+	addr := net.JoinHostPort(target, fmt.Sprintf("%d", port))
 	conn, err := net.DialTimeout("tcp", addr, timeout)
 	if err != nil {
 		return false
 	}
-	conn.Close()
+	_ = conn.Close()
 
 	// Placeholder - actual implementation requires full SMB session setup
 	return false
@@ -604,7 +609,7 @@ func writeJSON(path string, result *Result) error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	w := bufio.NewWriter(f)
 	enc := json.NewEncoder(w)

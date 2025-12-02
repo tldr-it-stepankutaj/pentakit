@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -240,9 +241,9 @@ func (d *NetworkDiagram) GenerateASCII() string {
 
 	for _, subnet := range d.Subnets {
 		// Subnet header
-		sb.WriteString(fmt.Sprintf("┌─────────────────────────────────────────────────────────────────────────────┐\n"))
+		sb.WriteString("┌─────────────────────────────────────────────────────────────────────────────┐\n")
 		sb.WriteString(fmt.Sprintf("│ Subnet: %-68s │\n", subnet.CIDR))
-		sb.WriteString(fmt.Sprintf("├─────────────────────────────────────────────────────────────────────────────┤\n"))
+		sb.WriteString("├─────────────────────────────────────────────────────────────────────────────┤\n")
 
 		// Nodes
 		for _, node := range subnet.Nodes {
@@ -270,7 +271,7 @@ func (d *NetworkDiagram) GenerateASCII() string {
 			sb.WriteString(fmt.Sprintf("│ %s %-15s %-30s %-20s │\n", gwMark, node.IP, hostname, services))
 		}
 
-		sb.WriteString(fmt.Sprintf("└─────────────────────────────────────────────────────────────────────────────┘\n\n"))
+		sb.WriteString("└─────────────────────────────────────────────────────────────────────────────┘\n\n")
 	}
 
 	// Legend
@@ -286,7 +287,7 @@ func extractIP(host string) string {
 	if idx := strings.LastIndex(host, ":"); idx != -1 {
 		portPart := host[idx+1:]
 		// Check if it's actually a port (numeric)
-		if _, err := fmt.Sscanf(portPart, "%d", new(int)); err == nil {
+		if _, err := strconv.Atoi(portPart); err == nil {
 			host = host[:idx]
 		}
 	}
@@ -313,7 +314,7 @@ func extractHostname(host string) string {
 	// Remove port if present
 	if idx := strings.LastIndex(host, ":"); idx != -1 {
 		portPart := host[idx+1:]
-		if _, err := fmt.Sscanf(portPart, "%d", new(int)); err == nil {
+		if _, err := strconv.Atoi(portPart); err == nil {
 			host = host[:idx]
 		}
 	}

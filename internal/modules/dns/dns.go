@@ -391,17 +391,20 @@ func attemptZoneTransfer(domain string, timeout time.Duration) []Result {
 		// Build AXFR query (simplified - real implementation would need full DNS packet)
 		// This is a basic attempt - full AXFR requires proper DNS packet construction
 		query := buildAXFRQuery(domain)
-		conn.SetDeadline(time.Now().Add(timeout * 3))
+		if err := conn.SetDeadline(time.Now().Add(timeout * 3)); err != nil {
+			_ = conn.Close()
+			continue
+		}
 		_, err = conn.Write(query)
 		if err != nil {
-			conn.Close()
+			_ = conn.Close()
 			continue
 		}
 
 		// Read response
 		buf := make([]byte, 65535)
 		n, err := conn.Read(buf)
-		conn.Close()
+		_ = conn.Close()
 
 		if err == nil && n > 12 {
 			// Check for successful response (simplified check)
@@ -476,11 +479,12 @@ func bruteForceSubdomains(ctx context.Context, domain string, wordlist []string,
 		},
 	}
 
+wordLoop:
 	for _, word := range wordlist {
 		word := word
 		select {
 		case <-ctx.Done():
-			break
+			break wordLoop
 		default:
 		}
 
@@ -547,7 +551,7 @@ func queryCTLogs(domain string, timeout time.Duration) ([]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to query crt.sh: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("crt.sh returned status %d", resp.StatusCode)
@@ -605,11 +609,12 @@ func resolveSubdomains(ctx context.Context, subdomains []string, nameserver stri
 		},
 	}
 
+subdomainLoop:
 	for _, subdomain := range subdomains {
 		subdomain := subdomain
 		select {
 		case <-ctx.Done():
-			break
+			break subdomainLoop
 		default:
 		}
 
@@ -660,7 +665,7 @@ func loadWordlist(path string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	var words []string
 	scanner := bufio.NewScanner(f)
@@ -727,7 +732,7 @@ func writeJSONL(path string, results []Result) error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	w := bufio.NewWriter(f)
 	enc := json.NewEncoder(w)

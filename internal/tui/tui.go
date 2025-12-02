@@ -32,7 +32,6 @@ type model struct {
 	targets      []target     // discovered subdomains
 	selected     map[int]bool // selected targets for scanning
 	cursor       int
-	menuCursor   int
 	status       string
 	statusType   string // info, success, error, running
 	lastDuration time.Duration
@@ -192,7 +191,7 @@ func (m model) runHTTPAnalysis() (tea.Model, tea.Cmd) {
 			if err != nil {
 				continue
 			}
-			conn.Close()
+			_ = conn.Close()
 
 			// Port is open, determine protocol
 			var url string
@@ -257,7 +256,7 @@ func (m model) runSSLAnalysis() (tea.Model, tea.Cmd) {
 			if err != nil {
 				continue
 			}
-			conn.Close()
+			_ = conn.Close()
 
 			// Port is open, run SSL analysis
 			cfg := ssl.RunConfig{
@@ -354,7 +353,7 @@ func (m model) runAllScans() (tea.Model, tea.Cmd) {
 			GrabBanner:    true,
 			DetectVersion: true,
 		}
-		services.Run(m.appCtx, cfg)
+		_, _ = services.Run(m.appCtx, cfg)
 
 		// Check which HTTP ports are open and analyze
 		httpPorts := []int{80, 443, 8080, 8443}
@@ -363,7 +362,7 @@ func (m model) runAllScans() (tea.Model, tea.Cmd) {
 			if err != nil {
 				continue
 			}
-			conn.Close()
+			_ = conn.Close()
 
 			var url string
 			if port == 443 || port == 8443 {
@@ -384,20 +383,20 @@ func (m model) runAllScans() (tea.Model, tea.Cmd) {
 				HeaderAnalysis:  true,
 				Timeout:         m.appCtx.Config.Timeout,
 			}
-			http.Run(m.appCtx, httpCfg)
+			_, _ = http.Run(m.appCtx, httpCfg)
 		}
 
 		// SSL on 443 if open
 		conn, err := net.DialTimeout("tcp", fmt.Sprintf("%s:443", host), 2*time.Second)
 		if err == nil {
-			conn.Close()
+			_ = conn.Close()
 			sslCfg := ssl.RunConfig{
 				Target:   t.domain,
 				Port:     443,
 				CheckAll: true,
 				Timeout:  m.appCtx.Config.Timeout,
 			}
-			ssl.Run(m.appCtx, sslCfg)
+			_, _ = ssl.Run(m.appCtx, sslCfg)
 		}
 	}
 

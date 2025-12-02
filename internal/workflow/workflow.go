@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -392,26 +393,34 @@ func evaluateCondition(execCtx *ExecutionContext, condition string) bool {
 		return fmt.Sprintf("%v", leftValue) != rightValue
 	case ">":
 		if lv, ok := leftValue.(int); ok {
-			var rv int
-			fmt.Sscanf(rightValue, "%d", &rv)
+			rv, err := strconv.Atoi(rightValue)
+			if err != nil {
+				return true
+			}
 			return lv > rv
 		}
 	case ">=":
 		if lv, ok := leftValue.(int); ok {
-			var rv int
-			fmt.Sscanf(rightValue, "%d", &rv)
+			rv, err := strconv.Atoi(rightValue)
+			if err != nil {
+				return true
+			}
 			return lv >= rv
 		}
 	case "<":
 		if lv, ok := leftValue.(int); ok {
-			var rv int
-			fmt.Sscanf(rightValue, "%d", &rv)
+			rv, err := strconv.Atoi(rightValue)
+			if err != nil {
+				return true
+			}
 			return lv < rv
 		}
 	case "<=":
 		if lv, ok := leftValue.(int); ok {
-			var rv int
-			fmt.Sscanf(rightValue, "%d", &rv)
+			rv, err := strconv.Atoi(rightValue)
+			if err != nil {
+				return true
+			}
 			return lv <= rv
 		}
 	}
@@ -500,7 +509,7 @@ func saveReport(report *ExecutionReport, path string) error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	w := bufio.NewWriter(f)
 	enc := json.NewEncoder(w)

@@ -246,7 +246,7 @@ func (r *Report) ExportJSON(path string) error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	w := bufio.NewWriter(f)
 	enc := json.NewEncoder(w)
@@ -394,7 +394,7 @@ func (r *Report) ExportMarkdown(path string) error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	return t.Execute(f, r)
 }
@@ -779,7 +779,7 @@ func (r *Report) ExportHTML(path string) error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	return t.Execute(f, r)
 }
@@ -894,7 +894,7 @@ func RenderMarkdownReport(outPath string, data ReportData) error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	return tmpl.Execute(f, data)
 }

@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -260,17 +261,19 @@ func bruteForceCommunities(target string, port int, communities []string, versio
 }
 
 func testCommunity(target string, port int, community string, version int, timeout time.Duration) bool {
-	addr := fmt.Sprintf("%s:%d", target, port)
+	addr := net.JoinHostPort(target, fmt.Sprintf("%d", port))
 	conn, err := net.DialTimeout("udp", addr, timeout)
 	if err != nil {
 		return false
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	// Build SNMP GET request for sysDescr
 	request := buildSNMPGetRequest(community, version, "1.3.6.1.2.1.1.1.0")
 
-	conn.SetDeadline(time.Now().Add(timeout))
+	if err := conn.SetDeadline(time.Now().Add(timeout)); err != nil {
+		return false
+	}
 	_, err = conn.Write(request)
 	if err != nil {
 		return false
@@ -349,16 +352,23 @@ func encodeOID(oid string) []byte {
 	}
 
 	// First two components are encoded as 40*first + second
-	var first, second int
-	fmt.Sscanf(parts[0], "%d", &first)
-	fmt.Sscanf(parts[1], "%d", &second)
+	first, err := strconv.Atoi(parts[0])
+	if err != nil {
+		return nil
+	}
+	second, err := strconv.Atoi(parts[1])
+	if err != nil {
+		return nil
+	}
 
 	encoded := []byte{byte(40*first + second)}
 
 	// Remaining components
 	for i := 2; i < len(parts); i++ {
-		var val int
-		fmt.Sscanf(parts[i], "%d", &val)
+		val, err := strconv.Atoi(parts[i])
+		if err != nil {
+			continue
+		}
 
 		if val < 128 {
 			encoded = append(encoded, byte(val))
@@ -449,16 +459,18 @@ func getSystemInfo(target string, port int, community string, version int, timeo
 }
 
 func getSNMPValue(target string, port int, community string, version int, oid string, timeout time.Duration) string {
-	addr := fmt.Sprintf("%s:%d", target, port)
+	addr := net.JoinHostPort(target, fmt.Sprintf("%d", port))
 	conn, err := net.DialTimeout("udp", addr, timeout)
 	if err != nil {
 		return ""
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	request := buildSNMPGetRequest(community, version, oid)
 
-	conn.SetDeadline(time.Now().Add(timeout))
+	if err := conn.SetDeadline(time.Now().Add(timeout)); err != nil {
+		return ""
+	}
 	_, err = conn.Write(request)
 	if err != nil {
 		return ""
@@ -531,7 +543,7 @@ func loadWordlist(path string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	var words []string
 	scanner := bufio.NewScanner(f)
@@ -552,7 +564,7 @@ func writeJSON(path string, result *Result) error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	w := bufio.NewWriter(f)
 	enc := json.NewEncoder(w)

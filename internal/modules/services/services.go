@@ -185,7 +185,7 @@ func detectService(ctx context.Context, host string, port int, timeout time.Dura
 	if err != nil {
 		return nil
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	result := &Result{
 		Host:       host,
@@ -262,7 +262,9 @@ func detectService(ctx context.Context, host string, port int, timeout time.Dura
 }
 
 func grabBannerFromConn(conn net.Conn, timeout time.Duration) string {
-	conn.SetReadDeadline(time.Now().Add(timeout))
+	if err := conn.SetReadDeadline(time.Now().Add(timeout)); err != nil {
+		return ""
+	}
 	buf := make([]byte, 4096)
 	n, err := conn.Read(buf)
 	if err != nil || n == 0 {
@@ -279,13 +281,17 @@ func sendProbes(conn net.Conn, timeout time.Duration) string {
 	}
 
 	for _, probe := range probes {
-		conn.SetWriteDeadline(time.Now().Add(timeout))
+		if err := conn.SetWriteDeadline(time.Now().Add(timeout)); err != nil {
+			continue
+		}
 		_, err := conn.Write(probe)
 		if err != nil {
 			continue
 		}
 
-		conn.SetReadDeadline(time.Now().Add(timeout))
+		if err := conn.SetReadDeadline(time.Now().Add(timeout)); err != nil {
+			continue
+		}
 		buf := make([]byte, 4096)
 		n, err := conn.Read(buf)
 		if err == nil && n > 0 {
@@ -324,7 +330,7 @@ func writeJSONL(path string, results []Result) error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	w := bufio.NewWriter(f)
 	enc := json.NewEncoder(w)

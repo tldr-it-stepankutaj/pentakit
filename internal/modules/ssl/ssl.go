@@ -70,6 +70,8 @@ type Vulnerability struct {
 }
 
 // TLS version constants for testing.
+// Note: SSL 3.0 (0x0300) is deprecated and removed from Go's crypto/tls.
+// We still test for it to detect vulnerable servers.
 var tlsVersions = []struct {
 	Name    string
 	Version uint16
@@ -78,7 +80,7 @@ var tlsVersions = []struct {
 	{"TLS 1.2", tls.VersionTLS12},
 	{"TLS 1.1", tls.VersionTLS11},
 	{"TLS 1.0", tls.VersionTLS10},
-	{"SSL 3.0", tls.VersionSSL30},
+	{"SSL 3.0", 0x0300}, // Deprecated constant, using raw value
 }
 
 // Weak cipher suites.
@@ -125,7 +127,7 @@ func Run(ctx app.Context, cfg RunConfig) (*Result, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect: %w", err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	state := conn.ConnectionState()
 	result.TLSVersion = tlsVersionName(state.Version)
@@ -257,7 +259,7 @@ func checkSupportedVersions(host string, port int, timeout time.Duration) []stri
 		conn, err := tls.DialWithDialer(dialer, "tcp", addr, tlsConfig)
 		if err == nil {
 			supported = append(supported, v.Name)
-			conn.Close()
+			_ = conn.Close()
 		}
 	}
 
@@ -301,7 +303,7 @@ func checkCipherSuites(host string, port int, timeout time.Duration) []string {
 				fmt.Printf("    [+] %s\n", name)
 			}
 
-			conn.Close()
+			_ = conn.Close()
 		}
 	}
 
@@ -444,7 +446,7 @@ func tlsVersionName(version uint16) string {
 		return "TLS 1.1"
 	case tls.VersionTLS10:
 		return "TLS 1.0"
-	case tls.VersionSSL30:
+	case 0x0300: // SSL 3.0 - deprecated constant
 		return "SSL 3.0"
 	default:
 		return fmt.Sprintf("Unknown (0x%04x)", version)
@@ -459,7 +461,7 @@ func writeJSON(path string, result *Result) error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	w := bufio.NewWriter(f)
 	enc := json.NewEncoder(w)

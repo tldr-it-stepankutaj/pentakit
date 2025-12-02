@@ -236,9 +236,9 @@ func Run(ctx app.Context, cfg RunConfig) ([]Result, error) {
 	for _, pair := range pairs {
 		select {
 		case <-stopChan:
-			break
+			stopped = true
 		case <-ctx.Ctx.Done():
-			break
+			stopped = true
 		default:
 		}
 
@@ -419,7 +419,7 @@ func testHTTP(ctx context.Context, target string, port int, user, pass string, c
 	if err != nil {
 		return false, ""
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	bodyBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 1024*100))
 	bodyStr := string(bodyBytes)
@@ -459,7 +459,7 @@ func testSSH(ctx context.Context, target string, port int, user, pass string, cf
 		port = 22
 	}
 
-	addr := fmt.Sprintf("%s:%d", target, port)
+	addr := net.JoinHostPort(target, fmt.Sprintf("%d", port))
 
 	// Simple SSH banner grab to verify service, then attempt auth
 	// Note: Full SSH auth would require golang.org/x/crypto/ssh package
@@ -467,10 +467,12 @@ func testSSH(ctx context.Context, target string, port int, user, pass string, cf
 	if err != nil {
 		return false, ""
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	// Read banner
-	conn.SetReadDeadline(time.Now().Add(cfg.Timeout))
+	if err := conn.SetReadDeadline(time.Now().Add(cfg.Timeout)); err != nil {
+		return false, ""
+	}
 	buf := make([]byte, 256)
 	n, err := conn.Read(buf)
 	if err != nil || n == 0 {
@@ -487,15 +489,17 @@ func testFTP(ctx context.Context, target string, port int, user, pass string, cf
 		port = 21
 	}
 
-	addr := fmt.Sprintf("%s:%d", target, port)
+	addr := net.JoinHostPort(target, fmt.Sprintf("%d", port))
 
 	conn, err := net.DialTimeout("tcp", addr, cfg.Timeout)
 	if err != nil {
 		return false, ""
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
-	conn.SetDeadline(time.Now().Add(cfg.Timeout))
+	if err := conn.SetDeadline(time.Now().Add(cfg.Timeout)); err != nil {
+		return false, ""
+	}
 
 	reader := bufio.NewReader(conn)
 
@@ -506,7 +510,9 @@ func testFTP(ctx context.Context, target string, port int, user, pass string, cf
 	}
 
 	// Send USER command
-	fmt.Fprintf(conn, "USER %s\r\n", user)
+	if _, err := fmt.Fprintf(conn, "USER %s\r\n", user); err != nil {
+		return false, ""
+	}
 	response, err := reader.ReadString('\n')
 	if err != nil {
 		return false, ""
@@ -522,7 +528,9 @@ func testFTP(ctx context.Context, target string, port int, user, pass string, cf
 	}
 
 	// Send PASS command
-	fmt.Fprintf(conn, "PASS %s\r\n", pass)
+	if _, err := fmt.Fprintf(conn, "PASS %s\r\n", pass); err != nil {
+		return false, ""
+	}
 	response, err = reader.ReadString('\n')
 	if err != nil {
 		return false, ""
@@ -536,40 +544,34 @@ func testFTP(ctx context.Context, target string, port int, user, pass string, cf
 	return false, ""
 }
 
-func testMySQL(ctx context.Context, target string, port int, user, pass string, cfg *RunConfig) (bool, string) {
-	if port == 0 {
-		port = 3306
-	}
-
+func testMySQL(_ context.Context, _ string, _ int, _, _ string, _ *RunConfig) (bool, string) {
 	// MySQL auth requires proper MySQL protocol implementation
 	// This is a placeholder - actual implementation would use mysql driver
 	return false, "MySQL auth not implemented - use external tool"
 }
 
-func testPostgres(ctx context.Context, target string, port int, user, pass string, cfg *RunConfig) (bool, string) {
-	if port == 0 {
-		port = 5432
-	}
-
+func testPostgres(_ context.Context, _ string, _ int, _, _ string, _ *RunConfig) (bool, string) {
 	// PostgreSQL auth requires proper PostgreSQL protocol implementation
 	// This is a placeholder - actual implementation would use pq driver
 	return false, "PostgreSQL auth not implemented - use external tool"
 }
 
-func testRedis(ctx context.Context, target string, port int, user, pass string, cfg *RunConfig) (bool, string) {
+func testRedis(_ context.Context, target string, port int, user, pass string, cfg *RunConfig) (bool, string) {
 	if port == 0 {
 		port = 6379
 	}
 
-	addr := fmt.Sprintf("%s:%d", target, port)
+	addr := net.JoinHostPort(target, fmt.Sprintf("%d", port))
 
 	conn, err := net.DialTimeout("tcp", addr, cfg.Timeout)
 	if err != nil {
 		return false, ""
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
-	conn.SetDeadline(time.Now().Add(cfg.Timeout))
+	if err := conn.SetDeadline(time.Now().Add(cfg.Timeout)); err != nil {
+		return false, ""
+	}
 
 	// Try AUTH command
 	var cmd string
@@ -602,9 +604,11 @@ func testRedis(ctx context.Context, target string, port int, user, pass string, 
 	if err != nil {
 		return false, ""
 	}
-	defer conn2.Close()
+	defer func() { _ = conn2.Close() }()
 
-	conn2.SetDeadline(time.Now().Add(cfg.Timeout))
+	if err := conn2.SetDeadline(time.Now().Add(cfg.Timeout)); err != nil {
+		return false, ""
+	}
 	_, err = conn2.Write([]byte("PING\r\n"))
 	if err != nil {
 		return false, ""
@@ -623,11 +627,7 @@ func testRedis(ctx context.Context, target string, port int, user, pass string, 
 	return false, ""
 }
 
-func testSMB(ctx context.Context, target string, port int, user, pass string, cfg *RunConfig) (bool, string) {
-	if port == 0 {
-		port = 445
-	}
-
+func testSMB(_ context.Context, _ string, _ int, _, _ string, _ *RunConfig) (bool, string) {
 	// SMB auth requires proper SMB protocol implementation
 	// This is a placeholder - actual implementation would use smb library
 	return false, "SMB auth not implemented - use external tool"
@@ -662,7 +662,7 @@ func loadWordlist(path string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	var words []string
 	scanner := bufio.NewScanner(f)
@@ -683,7 +683,7 @@ func writeJSONL(path string, results []Result) error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	w := bufio.NewWriter(f)
 	enc := json.NewEncoder(w)

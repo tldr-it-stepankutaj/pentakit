@@ -297,7 +297,7 @@ func analyzeURL(ctx context.Context, client *http.Client, targetURL string, cfg 
 	if err != nil {
 		return nil
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024*1024)) // Limit to 1MB
 
@@ -457,11 +457,12 @@ func bruteForceDirectories(ctx context.Context, client *http.Client, baseURL str
 
 	baseURL = strings.TrimSuffix(baseURL, "/")
 
+wordLoop:
 	for _, word := range wordlist {
 		word := word
 		select {
 		case <-ctx.Done():
-			break
+			break wordLoop
 		default:
 		}
 
@@ -489,7 +490,7 @@ func bruteForceDirectories(ctx context.Context, client *http.Client, baseURL str
 			if err != nil {
 				return
 			}
-			defer resp.Body.Close()
+			defer func() { _ = resp.Body.Close() }()
 
 			// Filter by status code
 			if len(cfg.StatusFilter) > 0 {
@@ -584,7 +585,7 @@ func loadWordlist(path string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	var words []string
 	scanner := bufio.NewScanner(f)
@@ -613,7 +614,7 @@ func writeJSONL(path string, results []Result) error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	w := bufio.NewWriter(f)
 	enc := json.NewEncoder(w)

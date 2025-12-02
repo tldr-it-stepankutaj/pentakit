@@ -1,6 +1,6 @@
 APP := pentakit
 
-.PHONY: build run test tidy
+.PHONY: build run test tidy lint vet fmt check
 
 build:
 	go build -o bin/$(APP) ./cmd/main
@@ -13,3 +13,14 @@ test:
 
 tidy:
 	go mod tidy
+
+lint:
+	golangci-lint run
+
+vet:
+	go vet ./...
+
+fmt:
+	go fmt ./...
+
+check: fmt vet lint test
