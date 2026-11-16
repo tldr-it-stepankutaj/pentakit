@@ -215,18 +215,18 @@ func generateExecutiveSummary(report *Report) string {
 	medCount := report.Statistics.FindingsBySeverity["medium"]
 	lowCount := report.Statistics.FindingsBySeverity["low"]
 
-	sb.WriteString(fmt.Sprintf("This penetration test identified %d security findings. ", report.Statistics.TotalFindings))
+	_, _ = fmt.Fprintf(&sb, "This penetration test identified %d security findings. ", report.Statistics.TotalFindings)
 
 	if critCount > 0 || highCount > 0 {
-		sb.WriteString(fmt.Sprintf("Of particular concern are %d critical and %d high severity vulnerabilities that require immediate attention. ", critCount, highCount))
+		_, _ = fmt.Fprintf(&sb, "Of particular concern are %d critical and %d high severity vulnerabilities that require immediate attention. ", critCount, highCount)
 	}
 
 	if medCount > 0 {
-		sb.WriteString(fmt.Sprintf("Additionally, %d medium severity issues were discovered that should be addressed in the near term. ", medCount))
+		_, _ = fmt.Fprintf(&sb, "Additionally, %d medium severity issues were discovered that should be addressed in the near term. ", medCount)
 	}
 
 	if lowCount > 0 {
-		sb.WriteString(fmt.Sprintf("%d low severity findings were also noted for consideration. ", lowCount))
+		_, _ = fmt.Fprintf(&sb, "%d low severity findings were also noted for consideration. ", lowCount)
 	}
 
 	if critCount == 0 && highCount == 0 && medCount == 0 && lowCount == 0 {
@@ -796,18 +796,18 @@ func (r *Report) RenderToString(format string) (string, error) {
 			return "", err
 		}
 	case "text":
-		buf.WriteString(fmt.Sprintf("PENTEST REPORT: %s\n", r.Title))
+		_, _ = fmt.Fprintf(&buf, "PENTEST REPORT: %s\n", r.Title)
 		buf.WriteString(strings.Repeat("=", 60) + "\n\n")
-		buf.WriteString(fmt.Sprintf("Generated: %s\n", r.Metadata.GeneratedAt.Format(time.RFC3339)))
-		buf.WriteString(fmt.Sprintf("Total Findings: %d\n\n", r.Statistics.TotalFindings))
+		_, _ = fmt.Fprintf(&buf, "Generated: %s\n", r.Metadata.GeneratedAt.Format(time.RFC3339))
+		_, _ = fmt.Fprintf(&buf, "Total Findings: %d\n\n", r.Statistics.TotalFindings)
 
 		buf.WriteString("FINDINGS:\n")
 		buf.WriteString(strings.Repeat("-", 40) + "\n")
 		for _, f := range r.Findings {
-			buf.WriteString(fmt.Sprintf("\n[%s] %s: %s\n", strings.ToUpper(f.Severity), f.ID, f.Title))
-			buf.WriteString(fmt.Sprintf("    Description: %s\n", f.Description))
-			buf.WriteString(fmt.Sprintf("    Impact: %s\n", f.Impact))
-			buf.WriteString(fmt.Sprintf("    Remediation: %s\n", f.Remediation))
+			_, _ = fmt.Fprintf(&buf, "\n[%s] %s: %s\n", strings.ToUpper(f.Severity), f.ID, f.Title)
+			_, _ = fmt.Fprintf(&buf, "    Description: %s\n", f.Description)
+			_, _ = fmt.Fprintf(&buf, "    Impact: %s\n", f.Impact)
+			_, _ = fmt.Fprintf(&buf, "    Remediation: %s\n", f.Remediation)
 		}
 	default:
 		return "", fmt.Errorf("unsupported format: %s", format)

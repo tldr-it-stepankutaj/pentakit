@@ -547,7 +547,7 @@ func (m model) View() string {
 func (m model) viewDomainInput() string {
 	var b strings.Builder
 
-	b.WriteString(fmt.Sprintf("  ┌─ Enter Domain %s┐\n", strings.Repeat("─", boxWidth-17)))
+	_, _ = fmt.Fprintf(&b, "  ┌─ Enter Domain %s┐\n", strings.Repeat("─", boxWidth-17))
 	b.WriteString(line(""))
 	b.WriteString(line("  Enter the target domain to begin reconnaissance:"))
 	b.WriteString(line(""))
@@ -555,7 +555,7 @@ func (m model) viewDomainInput() string {
 	b.WriteString(line(""))
 	b.WriteString(line("  DNS enumeration will discover subdomains automatically."))
 	b.WriteString(line(""))
-	b.WriteString(fmt.Sprintf("  └%s┘\n", strings.Repeat("─", boxWidth)))
+	_, _ = fmt.Fprintf(&b, "  └%s┘\n", strings.Repeat("─", boxWidth))
 	b.WriteString("\n")
 
 	if m.status != "" {
@@ -563,7 +563,7 @@ func (m model) viewDomainInput() string {
 		if m.statusType == "error" {
 			icon = "✖"
 		}
-		b.WriteString(fmt.Sprintf("  %s %s\n", icon, m.status))
+		_, _ = fmt.Fprintf(&b, "  %s %s\n", icon, m.status)
 		b.WriteString("\n")
 	}
 
@@ -575,7 +575,7 @@ func (m model) viewDomainInput() string {
 func (m model) viewDNSRunning() string {
 	var b strings.Builder
 
-	b.WriteString(fmt.Sprintf("  ┌─ DNS Enumeration %s┐\n", strings.Repeat("─", boxWidth-20)))
+	_, _ = fmt.Fprintf(&b, "  ┌─ DNS Enumeration %s┐\n", strings.Repeat("─", boxWidth-20))
 	b.WriteString(line(""))
 	b.WriteString(line(fmt.Sprintf("  Domain: %s", m.domain)))
 	b.WriteString(line(""))
@@ -585,7 +585,7 @@ func (m model) viewDNSRunning() string {
 	b.WriteString(line("    • Attempting zone transfer"))
 	b.WriteString(line("    • Brute-forcing subdomains"))
 	b.WriteString(line(""))
-	b.WriteString(fmt.Sprintf("  └%s┘\n", strings.Repeat("─", boxWidth)))
+	_, _ = fmt.Fprintf(&b, "  └%s┘\n", strings.Repeat("─", boxWidth))
 
 	return b.String()
 }
@@ -594,7 +594,7 @@ func (m model) viewMain() string {
 	var b strings.Builder
 
 	// Domain info
-	b.WriteString(fmt.Sprintf("  ┌─ Domain: %s %s┐\n", m.domain, strings.Repeat("─", boxWidth-13-len(m.domain))))
+	_, _ = fmt.Fprintf(&b, "  ┌─ Domain: %s %s┐\n", m.domain, strings.Repeat("─", boxWidth-13-len(m.domain)))
 	selectedCount := 0
 	for _, v := range m.selected {
 		if v {
@@ -602,11 +602,11 @@ func (m model) viewMain() string {
 		}
 	}
 	b.WriteString(line(fmt.Sprintf("  Discovered: %d targets    Selected: %d", len(m.targets), selectedCount)))
-	b.WriteString(fmt.Sprintf("  └%s┘\n", strings.Repeat("─", boxWidth)))
+	_, _ = fmt.Fprintf(&b, "  └%s┘\n", strings.Repeat("─", boxWidth))
 	b.WriteString("\n")
 
 	// Targets list
-	b.WriteString(fmt.Sprintf("  ┌─ Targets %s┐\n", strings.Repeat("─", boxWidth-12)))
+	_, _ = fmt.Fprintf(&b, "  ┌─ Targets %s┐\n", strings.Repeat("─", boxWidth-12))
 
 	maxVisible := 10
 	startIdx := 0
@@ -654,11 +654,11 @@ func (m model) viewMain() string {
 		b.WriteString(line(fmt.Sprintf("  ↓ %d more below", len(m.targets)-endIdx)))
 	}
 
-	b.WriteString(fmt.Sprintf("  └%s┘\n", strings.Repeat("─", boxWidth)))
+	_, _ = fmt.Fprintf(&b, "  └%s┘\n", strings.Repeat("─", boxWidth))
 	b.WriteString("\n")
 
 	// Actions
-	b.WriteString(fmt.Sprintf("  ┌─ Actions %s┐\n", strings.Repeat("─", boxWidth-12)))
+	_, _ = fmt.Fprintf(&b, "  ┌─ Actions %s┐\n", strings.Repeat("─", boxWidth-12))
 	b.WriteString(line(""))
 	b.WriteString(line("  [1] HTTP Analysis      Scan selected for HTTP security"))
 	b.WriteString(line("  [2] SSL/TLS Analysis   Check certificates & ciphers"))
@@ -668,7 +668,7 @@ func (m model) viewMain() string {
 	b.WriteString(line("  [r] Generate Report    Create report from findings"))
 	b.WriteString(line("  [d] New Domain         Start with different domain"))
 	b.WriteString(line(""))
-	b.WriteString(fmt.Sprintf("  └%s┘\n", strings.Repeat("─", boxWidth)))
+	_, _ = fmt.Fprintf(&b, "  └%s┘\n", strings.Repeat("─", boxWidth))
 	b.WriteString("\n")
 
 	// Status
@@ -681,7 +681,7 @@ func (m model) viewMain() string {
 	case "running":
 		icon = "◐"
 	}
-	b.WriteString(fmt.Sprintf("  %s %s\n", icon, m.status))
+	_, _ = fmt.Fprintf(&b, "  %s %s\n", icon, m.status)
 	b.WriteString("\n")
 
 	// Help
@@ -693,11 +693,11 @@ func (m model) viewMain() string {
 func (m model) viewScanning() string {
 	var b strings.Builder
 
-	b.WriteString(fmt.Sprintf("  ┌─ Scanning %s┐\n", strings.Repeat("─", boxWidth-13)))
+	_, _ = fmt.Fprintf(&b, "  ┌─ Scanning %s┐\n", strings.Repeat("─", boxWidth-13))
 	b.WriteString(line(""))
 	b.WriteString(line(fmt.Sprintf("  %s %s", spinnerFrames[m.spinnerFrame], m.status)))
 	b.WriteString(line(""))
-	b.WriteString(fmt.Sprintf("  └%s┘\n", strings.Repeat("─", boxWidth)))
+	_, _ = fmt.Fprintf(&b, "  └%s┘\n", strings.Repeat("─", boxWidth))
 	b.WriteString("\n")
 	b.WriteString("  [q] Quit\n")
 
@@ -714,15 +714,15 @@ func (m model) viewResult() string {
 		title = "ERROR"
 	}
 
-	b.WriteString(fmt.Sprintf("  ┌%s┐\n", strings.Repeat("─", boxWidth)))
+	_, _ = fmt.Fprintf(&b, "  ┌%s┐\n", strings.Repeat("─", boxWidth))
 	b.WriteString(line(fmt.Sprintf("  %s %s", icon, title)))
-	b.WriteString(fmt.Sprintf("  ├%s┤\n", strings.Repeat("─", boxWidth)))
+	_, _ = fmt.Fprintf(&b, "  ├%s┤\n", strings.Repeat("─", boxWidth))
 	b.WriteString(line(""))
 	b.WriteString(line(fmt.Sprintf("  %s", m.status)))
 	b.WriteString(line(""))
 	b.WriteString(line(fmt.Sprintf("  Duration: %s", m.lastDuration.Round(time.Millisecond))))
 	b.WriteString(line(""))
-	b.WriteString(fmt.Sprintf("  └%s┘\n", strings.Repeat("─", boxWidth)))
+	_, _ = fmt.Fprintf(&b, "  └%s┘\n", strings.Repeat("─", boxWidth))
 	b.WriteString("\n")
 	b.WriteString("  Press any key to continue...\n")
 
