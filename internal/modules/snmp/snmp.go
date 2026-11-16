@@ -412,16 +412,12 @@ func isValidSNMPResponse(data []byte) bool {
 	}
 
 	// Try to parse as ASN.1
-	var msg asn1.RawValue
-	_, err := asn1.Unmarshal(data, &msg)
-	if err != nil {
-		return false
-	}
-
 	// Check for error in response
 	// A valid response should have response PDU (0xA2)
 	// and no error status
-	return true
+	var msg asn1.RawValue
+	_, err := asn1.Unmarshal(data, &msg)
+	return err == nil
 }
 
 func getSystemInfo(target string, port int, community string, version int, timeout time.Duration) *SystemInfo {
