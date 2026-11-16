@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"net"
+	"sort"
 	"strings"
 	"time"
 
@@ -16,6 +17,31 @@ import (
 )
 
 const boxWidth = 70
+
+// Ports shared by more than one scan action, hoisted so they can't drift
+// between the single-scan and "run all scans" code paths.
+var (
+	httpPorts = []int{80, 443, 8080, 8443}
+	sslPorts  = []int{443, 8443, 993, 995, 465, 636}
+)
+
+var spinnerFrames = []string{"◐", "◓", "◑", "◒"}
+
+const spinnerInterval = 120 * time.Millisecond
+
+// tickMsg drives the spinner animation while a scan runs in the background.
+type tickMsg time.Time
+
+// scanDoneMsg is delivered when a background scan command finishes.
+type scanDoneMsg struct {
+	statusType string
+	status     string
+	duration   time.Duration
+}
+
+func tickCmd() tea.Cmd {
+	return tea.Tick(spinnerInterval, func(t time.Time) tea.Msg { return tickMsg(t) })
+}
 
 // Discovered target from DNS
 type target struct {
@@ -36,6 +62,7 @@ type model struct {
 	statusType   string // info, success, error, running
 	lastDuration time.Duration
 	dnsResults   []dns.Record
+	spinnerFrame int
 }
 
 func (m model) Init() tea.Cmd { return nil }
@@ -48,12 +75,30 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.handleDomainInput(msg)
 		case "main":
 			return m.handleMainMenu(msg)
+		case "scanning":
+			switch msg.String() {
+			case "q", "ctrl+c", "esc":
+				return m, tea.Quit
+			}
+			return m, nil
 		case "result":
 			m.view = "main"
 			m.statusType = "info"
 			m.status = "Ready"
 			return m, nil
 		}
+	case tickMsg:
+		if m.view != "scanning" {
+			return m, nil
+		}
+		m.spinnerFrame = (m.spinnerFrame + 1) % len(spinnerFrames)
+		return m, tickCmd()
+	case scanDoneMsg:
+		m.view = "result"
+		m.statusType = msg.statusType
+		m.status = msg.status
+		m.lastDuration = msg.duration
+		return m, nil
 	}
 	return m, nil
 }
@@ -164,6 +209,18 @@ func (m model) handleMainMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// startScan transitions into the "scanning" view and kicks off work with
+// both a spinner tick and the scan itself, so the Bubble Tea event loop
+// keeps redrawing (and keeps accepting q/ctrl+c) while work runs in the
+// background instead of blocking Update for the whole scan duration.
+func (m model) startScan(label string, work tea.Cmd) (tea.Model, tea.Cmd) {
+	m.view = "scanning"
+	m.statusType = "running"
+	m.status = label
+	m.spinnerFrame = 0
+	return m, tea.Batch(tickCmd(), work)
+}
+
 func (m model) runHTTPAnalysis() (tea.Model, tea.Cmd) {
 	selected := m.getSelectedTargets()
 	if len(selected) == 0 {
@@ -172,60 +229,56 @@ func (m model) runHTTPAnalysis() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	m.statusType = "running"
-	start := time.Now()
-	var successCount int
+	cfg := m.appCtx.Config
+	return m.startScan(fmt.Sprintf("Scanning %d targets for HTTP endpoints...", len(selected)), func() tea.Msg {
+		start := time.Now()
+		var successCount, attemptCount int
 
-	for _, t := range selected {
-		m.status = fmt.Sprintf("Scanning %s...", t.domain)
+		for _, t := range selected {
+			host := t.domain
+			if len(t.ips) > 0 {
+				host = t.ips[0]
+			}
 
-		// First detect which ports are open
-		host := t.domain
-		if len(t.ips) > 0 {
-			host = t.ips[0]
+			for _, port := range httpPorts {
+				conn, err := net.DialTimeout("tcp", fmt.Sprintf("%s:%d", host, port), 3*time.Second)
+				if err != nil {
+					continue
+				}
+				_ = conn.Close()
+
+				var url string
+				if port == 443 || port == 8443 {
+					url = fmt.Sprintf("https://%s:%d", t.domain, port)
+					if port == 443 {
+						url = fmt.Sprintf("https://%s", t.domain)
+					}
+				} else {
+					url = fmt.Sprintf("http://%s:%d", t.domain, port)
+					if port == 80 {
+						url = fmt.Sprintf("http://%s", t.domain)
+					}
+				}
+
+				attemptCount++
+				httpCfg := http.RunConfig{
+					Target:          url,
+					TechFingerprint: true,
+					HeaderAnalysis:  true,
+					Timeout:         cfg.Timeout,
+				}
+				if _, err := http.Run(m.appCtx, httpCfg); err == nil {
+					successCount++
+				}
+			}
 		}
 
-		httpPorts := []int{80, 443, 8080, 8443}
-		for _, port := range httpPorts {
-			conn, err := net.DialTimeout("tcp", fmt.Sprintf("%s:%d", host, port), 3*time.Second)
-			if err != nil {
-				continue
-			}
-			_ = conn.Close()
-
-			// Port is open, determine protocol
-			var url string
-			if port == 443 || port == 8443 {
-				url = fmt.Sprintf("https://%s:%d", t.domain, port)
-				if port == 443 {
-					url = fmt.Sprintf("https://%s", t.domain)
-				}
-			} else {
-				url = fmt.Sprintf("http://%s:%d", t.domain, port)
-				if port == 80 {
-					url = fmt.Sprintf("http://%s", t.domain)
-				}
-			}
-
-			cfg := http.RunConfig{
-				Target:          url,
-				TechFingerprint: true,
-				HeaderAnalysis:  true,
-				Timeout:         m.appCtx.Config.Timeout,
-			}
-			_, err = http.Run(m.appCtx, cfg)
-			if err == nil {
-				successCount++
-			}
+		return scanDoneMsg{
+			statusType: "success",
+			status:     fmt.Sprintf("HTTP analysis completed: %d/%d endpoints responded", successCount, attemptCount),
+			duration:   time.Since(start),
 		}
-	}
-
-	m.lastDuration = time.Since(start)
-	m.view = "result"
-	m.statusType = "success"
-	m.status = fmt.Sprintf("HTTP analysis completed: %d endpoints found", successCount)
-
-	return m, nil
+	})
 }
 
 func (m model) runSSLAnalysis() (tea.Model, tea.Cmd) {
@@ -236,48 +289,43 @@ func (m model) runSSLAnalysis() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	m.statusType = "running"
-	start := time.Now()
-	var successCount int
+	cfg := m.appCtx.Config
+	return m.startScan(fmt.Sprintf("Checking SSL/TLS on %d targets...", len(selected)), func() tea.Msg {
+		start := time.Now()
+		var successCount, attemptCount int
 
-	sslPorts := []int{443, 8443, 993, 995, 465, 636}
-
-	for _, t := range selected {
-		m.status = fmt.Sprintf("Checking SSL on %s...", t.domain)
-
-		host := t.domain
-		if len(t.ips) > 0 {
-			host = t.ips[0]
-		}
-
-		for _, port := range sslPorts {
-			// Check if port is open
-			conn, err := net.DialTimeout("tcp", fmt.Sprintf("%s:%d", host, port), 3*time.Second)
-			if err != nil {
-				continue
+		for _, t := range selected {
+			host := t.domain
+			if len(t.ips) > 0 {
+				host = t.ips[0]
 			}
-			_ = conn.Close()
 
-			// Port is open, run SSL analysis
-			cfg := ssl.RunConfig{
-				Target:   t.domain,
-				Port:     port,
-				CheckAll: true,
-				Timeout:  m.appCtx.Config.Timeout,
-			}
-			_, err = ssl.Run(m.appCtx, cfg)
-			if err == nil {
-				successCount++
+			for _, port := range sslPorts {
+				conn, err := net.DialTimeout("tcp", fmt.Sprintf("%s:%d", host, port), 3*time.Second)
+				if err != nil {
+					continue
+				}
+				_ = conn.Close()
+
+				attemptCount++
+				sslCfg := ssl.RunConfig{
+					Target:   t.domain,
+					Port:     port,
+					CheckAll: true,
+					Timeout:  cfg.Timeout,
+				}
+				if _, err := ssl.Run(m.appCtx, sslCfg); err == nil {
+					successCount++
+				}
 			}
 		}
-	}
 
-	m.lastDuration = time.Since(start)
-	m.view = "result"
-	m.statusType = "success"
-	m.status = fmt.Sprintf("SSL analysis completed: %d endpoints found", successCount)
-
-	return m, nil
+		return scanDoneMsg{
+			statusType: "success",
+			status:     fmt.Sprintf("SSL analysis completed: %d/%d endpoints responded", successCount, attemptCount),
+			duration:   time.Since(start),
+		}
+	})
 }
 
 func (m model) runServiceDetection() (tea.Model, tea.Cmd) {
@@ -288,40 +336,39 @@ func (m model) runServiceDetection() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	m.statusType = "running"
-	m.status = fmt.Sprintf("Running service detection on %d targets...", len(selected))
-
-	start := time.Now()
-	var successCount int
-
+	cfg := m.appCtx.Config
 	commonPorts := []int{21, 22, 23, 25, 80, 443, 3306, 5432, 8080, 8443}
 
-	for _, t := range selected {
-		// Use IP if available, otherwise domain
-		host := t.domain
-		if len(t.ips) > 0 {
-			host = t.ips[0]
+	return m.startScan(fmt.Sprintf("Running service detection on %d targets...", len(selected)), func() tea.Msg {
+		start := time.Now()
+		var successCount, failCount int
+
+		for _, t := range selected {
+			host := t.domain
+			if len(t.ips) > 0 {
+				host = t.ips[0]
+			}
+
+			svcCfg := services.RunConfig{
+				Target:        host,
+				Ports:         commonPorts,
+				Timeout:       cfg.Timeout,
+				GrabBanner:    true,
+				DetectVersion: true,
+			}
+			if _, err := services.Run(m.appCtx, svcCfg); err == nil {
+				successCount++
+			} else {
+				failCount++
+			}
 		}
 
-		cfg := services.RunConfig{
-			Target:        host,
-			Ports:         commonPorts,
-			Timeout:       m.appCtx.Config.Timeout,
-			GrabBanner:    true,
-			DetectVersion: true,
+		return scanDoneMsg{
+			statusType: "success",
+			status:     fmt.Sprintf("Service detection completed: %d scanned, %d failed", successCount, failCount),
+			duration:   time.Since(start),
 		}
-		_, err := services.Run(m.appCtx, cfg)
-		if err == nil {
-			successCount++
-		}
-	}
-
-	m.lastDuration = time.Since(start)
-	m.view = "result"
-	m.statusType = "success"
-	m.status = fmt.Sprintf("Service detection completed: %d hosts scanned", successCount)
-
-	return m, nil
+	})
 }
 
 func (m model) runAllScans() (tea.Model, tea.Cmd) {
@@ -332,80 +379,78 @@ func (m model) runAllScans() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	m.statusType = "running"
-	start := time.Now()
-
+	cfg := m.appCtx.Config
 	commonPorts := []int{21, 22, 25, 80, 443, 3306, 5432, 8080, 8443}
 
-	for i, t := range selected {
-		m.status = fmt.Sprintf("[%d/%d] Scanning %s...", i+1, len(selected), t.domain)
+	return m.startScan(fmt.Sprintf("Running all scans on %d targets...", len(selected)), func() tea.Msg {
+		start := time.Now()
 
-		host := t.domain
-		if len(t.ips) > 0 {
-			host = t.ips[0]
-		}
-
-		// First: Service detection on all ports
-		cfg := services.RunConfig{
-			Target:        host,
-			Ports:         commonPorts,
-			Timeout:       m.appCtx.Config.Timeout,
-			GrabBanner:    true,
-			DetectVersion: true,
-		}
-		_, _ = services.Run(m.appCtx, cfg)
-
-		// Check which HTTP ports are open and analyze
-		httpPorts := []int{80, 443, 8080, 8443}
-		for _, port := range httpPorts {
-			conn, err := net.DialTimeout("tcp", fmt.Sprintf("%s:%d", host, port), 2*time.Second)
-			if err != nil {
-				continue
+		for _, t := range selected {
+			host := t.domain
+			if len(t.ips) > 0 {
+				host = t.ips[0]
 			}
-			_ = conn.Close()
 
-			var url string
-			if port == 443 || port == 8443 {
-				url = fmt.Sprintf("https://%s", t.domain)
-				if port != 443 {
-					url = fmt.Sprintf("https://%s:%d", t.domain, port)
+			// First: Service detection on all ports
+			svcCfg := services.RunConfig{
+				Target:        host,
+				Ports:         commonPorts,
+				Timeout:       cfg.Timeout,
+				GrabBanner:    true,
+				DetectVersion: true,
+			}
+			_, _ = services.Run(m.appCtx, svcCfg)
+
+			// Check which HTTP ports are open and analyze
+			for _, port := range httpPorts {
+				conn, err := net.DialTimeout("tcp", fmt.Sprintf("%s:%d", host, port), 2*time.Second)
+				if err != nil {
+					continue
 				}
-			} else {
-				url = fmt.Sprintf("http://%s", t.domain)
-				if port != 80 {
-					url = fmt.Sprintf("http://%s:%d", t.domain, port)
+				_ = conn.Close()
+
+				var url string
+				if port == 443 || port == 8443 {
+					url = fmt.Sprintf("https://%s", t.domain)
+					if port != 443 {
+						url = fmt.Sprintf("https://%s:%d", t.domain, port)
+					}
+				} else {
+					url = fmt.Sprintf("http://%s", t.domain)
+					if port != 80 {
+						url = fmt.Sprintf("http://%s:%d", t.domain, port)
+					}
 				}
+
+				httpCfg := http.RunConfig{
+					Target:          url,
+					TechFingerprint: true,
+					HeaderAnalysis:  true,
+					Timeout:         cfg.Timeout,
+				}
+				_, _ = http.Run(m.appCtx, httpCfg)
 			}
 
-			httpCfg := http.RunConfig{
-				Target:          url,
-				TechFingerprint: true,
-				HeaderAnalysis:  true,
-				Timeout:         m.appCtx.Config.Timeout,
+			// SSL on 443 if open
+			conn, err := net.DialTimeout("tcp", fmt.Sprintf("%s:443", host), 2*time.Second)
+			if err == nil {
+				_ = conn.Close()
+				sslCfg := ssl.RunConfig{
+					Target:   t.domain,
+					Port:     443,
+					CheckAll: true,
+					Timeout:  cfg.Timeout,
+				}
+				_, _ = ssl.Run(m.appCtx, sslCfg)
 			}
-			_, _ = http.Run(m.appCtx, httpCfg)
 		}
 
-		// SSL on 443 if open
-		conn, err := net.DialTimeout("tcp", fmt.Sprintf("%s:443", host), 2*time.Second)
-		if err == nil {
-			_ = conn.Close()
-			sslCfg := ssl.RunConfig{
-				Target:   t.domain,
-				Port:     443,
-				CheckAll: true,
-				Timeout:  m.appCtx.Config.Timeout,
-			}
-			_, _ = ssl.Run(m.appCtx, sslCfg)
+		return scanDoneMsg{
+			statusType: "success",
+			status:     fmt.Sprintf("All scans completed on %d targets", len(selected)),
+			duration:   time.Since(start),
 		}
-	}
-
-	m.lastDuration = time.Since(start)
-	m.view = "result"
-	m.statusType = "success"
-	m.status = fmt.Sprintf("All scans completed on %d targets", len(selected))
-
-	return m, nil
+	})
 }
 
 func (m model) generateReport() (tea.Model, tea.Cmd) {
@@ -462,6 +507,10 @@ func extractTargets(records []dns.Record, baseDomain string) []target {
 	for _, t := range targetMap {
 		result = append(result, *t)
 	}
+	// Map iteration order is randomized; sort so the target list (and the
+	// cursor position a user remembers) stays stable across runs over the
+	// same DNS data.
+	sort.Slice(result, func(i, j int) bool { return result[i].domain < result[j].domain })
 	return result
 }
 
@@ -486,6 +535,8 @@ func (m model) View() string {
 		b.WriteString(m.viewDNSRunning())
 	case "main":
 		b.WriteString(m.viewMain())
+	case "scanning":
+		b.WriteString(m.viewScanning())
 	case "result":
 		b.WriteString(m.viewResult())
 	}
@@ -635,6 +686,20 @@ func (m model) viewMain() string {
 
 	// Help
 	b.WriteString("  [Space] Toggle  [a] All  [n] None  [↑↓/jk] Navigate  [q] Quit\n")
+
+	return b.String()
+}
+
+func (m model) viewScanning() string {
+	var b strings.Builder
+
+	b.WriteString(fmt.Sprintf("  ┌─ Scanning %s┐\n", strings.Repeat("─", boxWidth-13)))
+	b.WriteString(line(""))
+	b.WriteString(line(fmt.Sprintf("  %s %s", spinnerFrames[m.spinnerFrame], m.status)))
+	b.WriteString(line(""))
+	b.WriteString(fmt.Sprintf("  └%s┘\n", strings.Repeat("─", boxWidth)))
+	b.WriteString("\n")
+	b.WriteString("  [q] Quit\n")
 
 	return b.String()
 }
