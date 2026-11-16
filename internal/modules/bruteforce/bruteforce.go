@@ -15,6 +15,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"golang.org/x/crypto/ssh"
+
 	"github.com/tldr-it-stepankutaj/pentakit/internal/app"
 	"github.com/tldr-it-stepankutaj/pentakit/internal/fsutil"
 )
@@ -464,27 +466,37 @@ func testSSH(ctx context.Context, target string, port int, user, pass string, cf
 
 	addr := net.JoinHostPort(target, fmt.Sprintf("%d", port))
 
-	// Simple SSH banner grab to verify service, then attempt auth
-	// Note: Full SSH auth would require golang.org/x/crypto/ssh package
-	conn, err := net.DialTimeout("tcp", addr, cfg.Timeout)
+	dialer := net.Dialer{Timeout: cfg.Timeout}
+	conn, err := dialer.DialContext(ctx, "tcp", addr)
 	if err != nil {
 		return false, ""
 	}
-	defer func() { _ = conn.Close() }()
 
-	// Read banner
-	if err := conn.SetReadDeadline(time.Now().Add(cfg.Timeout)); err != nil {
+	config := &ssh.ClientConfig{
+		User: user,
+		Auth: []ssh.AuthMethod{ssh.Password(pass)},
+		// We are deliberately brute-forcing a target whose host key we have
+		// no prior knowledge of — the same reasoning as testHTTP's
+		// InsecureSkipVerify for TLS, not an oversight. Checking host keys
+		// has nothing to do with the credential being tested.
+		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+		Timeout:         cfg.Timeout,
+	}
+
+	sshConn, chans, reqs, err := ssh.NewClientConn(conn, addr, config)
+	if err != nil {
+		_ = conn.Close()
+		// Covers both a rejected credential (ssh.ServerAuthError, the
+		// expected case while brute-forcing) and a lower-level handshake
+		// failure (e.g. the service isn't actually SSH) — either way, this
+		// (user, pass) pair did not get us in.
 		return false, ""
 	}
-	buf := make([]byte, 256)
-	n, err := conn.Read(buf)
-	if err != nil || n == 0 {
-		return false, ""
-	}
 
-	// SSH auth requires proper SSH client implementation
-	// This is a placeholder - actual implementation would use golang.org/x/crypto/ssh
-	return false, "SSH auth not implemented - use external tool"
+	client := ssh.NewClient(sshConn, chans, reqs)
+	defer func() { _ = client.Close() }()
+
+	return true, "SSH authentication successful"
 }
 
 func testFTP(ctx context.Context, target string, port int, user, pass string, cfg *RunConfig) (bool, string) {

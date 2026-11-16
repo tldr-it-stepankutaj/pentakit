@@ -15,6 +15,7 @@ import (
 
 	"github.com/tldr-it-stepankutaj/pentakit/internal/app"
 	"github.com/tldr-it-stepankutaj/pentakit/internal/fsutil"
+	"github.com/tldr-it-stepankutaj/pentakit/internal/targets"
 )
 
 // Module implements the DNS enumeration module metadata.
@@ -238,7 +239,7 @@ func Run(ctx app.Context, cfg RunConfig) ([]Result, error) {
 	if cfg.ReverseLookup && cfg.IPRange != "" {
 		fmt.Printf("\n[*] Performing reverse DNS lookup on %s\n", cfg.IPRange)
 
-		ips, err := expandCIDR(cfg.IPRange)
+		ips, err := targets.ExpandCIDR(cfg.IPRange)
 		if err != nil {
 			return nil, fmt.Errorf("invalid IP range: %w", err)
 		}
@@ -656,37 +657,6 @@ subdomainLoop:
 
 	wg.Wait()
 	return results
-}
-
-func expandCIDR(cidr string) ([]string, error) {
-	ip, ipnet, err := net.ParseCIDR(cidr)
-	if err != nil {
-		// Try as single IP
-		if net.ParseIP(cidr) != nil {
-			return []string{cidr}, nil
-		}
-		return nil, err
-	}
-
-	var ips []string
-	for ip := ip.Mask(ipnet.Mask); ipnet.Contains(ip); incIP(ip) {
-		ips = append(ips, ip.String())
-	}
-
-	// Remove network and broadcast for IPv4
-	if ip.To4() != nil && len(ips) > 2 {
-		return ips[1 : len(ips)-1], nil
-	}
-	return ips, nil
-}
-
-func incIP(ip net.IP) {
-	for i := len(ip) - 1; i >= 0; i-- {
-		ip[i]++
-		if ip[i] > 0 {
-			break
-		}
-	}
 }
 
 func printResult(r Result) {

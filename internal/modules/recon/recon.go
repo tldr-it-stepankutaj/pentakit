@@ -13,6 +13,7 @@ import (
 
 	"github.com/tldr-it-stepankutaj/pentakit/internal/app"
 	"github.com/tldr-it-stepankutaj/pentakit/internal/fsutil"
+	"github.com/tldr-it-stepankutaj/pentakit/internal/targets"
 )
 
 // Module implements the basic recon module metadata.
@@ -38,43 +39,16 @@ type Result struct {
 	Port int    `json:"port"`
 }
 
-// expandTarget expands a single target or a CIDR range into a list of IPs.
-func expandTarget(target string) ([]string, error) {
-	// Try to parse as CIDR
-	if ip, ipnet, err := net.ParseCIDR(target); err == nil {
-		var ips []string
-		for ip := ip.Mask(ipnet.Mask); ipnet.Contains(ip); ip = nextIP(ip) {
-			ipCopy := make(net.IP, len(ip))
-			copy(ipCopy, ip)
-			ips = append(ips, ipCopy.String())
-		}
-		// Drop network and broadcast for IPv4
-		if ip.To4() != nil && len(ips) > 2 {
-			return ips[1 : len(ips)-1], nil
-		}
-		return ips, nil
-	}
-	// Otherwise return as-is (single host)
-	return []string{target}, nil
-}
-
-// nextIP increments an IP address by 1.
-func nextIP(ip net.IP) net.IP {
-	next := make(net.IP, len(ip))
-	copy(next, ip)
-	for i := len(next) - 1; i >= 0; i-- {
-		next[i]++
-		if next[i] != 0 {
-			break
-		}
-	}
-	return next
-}
-
-// Run executes a concurrent TCP connect probe on a host or CIDR range.
-func Run(ctx app.Context, cfg RunConfig) error {
+// Run executes a concurrent TCP connect probe on a host or CIDR range,
+// returning every open host:port it found (in addition to the usual
+// stdout/JSONL/markdown reporting as a side effect). The caller-visible
+// result lets a workflow step chain recon's findings into a later step
+// (e.g. "scan the ports recon actually found open" via a step config value
+// of "${recon.output}") instead of only being able to give both steps the
+// same hard-coded port list.
+func Run(ctx app.Context, cfg RunConfig) ([]Result, error) {
 	if cfg.Target == "" {
-		return fmt.Errorf("target cannot be empty")
+		return nil, fmt.Errorf("target cannot be empty")
 	}
 	if len(cfg.Ports) == 0 {
 		cfg.Ports = []int{80, 443}
@@ -90,13 +64,13 @@ func Run(ctx app.Context, cfg RunConfig) error {
 	}
 
 	// Expand single host or CIDR into concrete targets.
-	targets, err := expandTarget(cfg.Target)
+	targets, err := targets.ExpandHostOrCIDR(cfg.Target)
 	if err != nil {
-		return fmt.Errorf("failed to expand target %q: %w", cfg.Target, err)
+		return nil, fmt.Errorf("failed to expand target %q: %w", cfg.Target, err)
 	}
 	if len(targets) == 0 {
 		fmt.Println("No targets to scan after expansion.")
-		return nil
+		return nil, nil
 	}
 
 	type hostRes struct {
@@ -169,7 +143,7 @@ func Run(ctx app.Context, cfg RunConfig) error {
 		fmt.Printf("[!] failed to render markdown report: %v\n", err)
 	}
 
-	return nil
+	return all, nil
 }
 
 // probe performs concurrent TCP connect attempts to the given ports.

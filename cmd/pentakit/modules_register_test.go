@@ -4,6 +4,8 @@ import (
 	"reflect"
 	"testing"
 	"time"
+
+	"github.com/tldr-it-stepankutaj/pentakit/internal/modules/recon"
 )
 
 func TestParsePortSpec(t *testing.T) {
@@ -50,6 +52,17 @@ func TestCfgPorts(t *testing.T) {
 		{"range string (e.g. full-assessment)", map[string]interface{}{
 			"ports": "1-3",
 		}, []int{1, 2, 3}},
+		{
+			name: "[]recon.Result (\"${recon.output}\" chained from a dependent step)",
+			cfg: map[string]interface{}{
+				"ports": []recon.Result{
+					{Host: "10.0.0.1", Port: 443},
+					{Host: "10.0.0.1", Port: 80},
+					{Host: "10.0.0.2", Port: 443}, // same port, different host: counted once
+				},
+			},
+			want: []int{443, 80},
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

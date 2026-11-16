@@ -2,6 +2,7 @@ package pentakit
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -148,7 +149,8 @@ var reconCmd = &cobra.Command{
 			Timeout: timeout,
 			Ports:   ports,
 		}
-		return recon.Run(appCtx, runCfg)
+		_, err = recon.Run(appCtx, runCfg)
+		return err
 	},
 }
 
@@ -590,6 +592,12 @@ var modulesCmd = &cobra.Command{
 	},
 }
 
+// moduleInfo is the JSON shape of one entry in `modules list --json`.
+type moduleInfo struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+}
+
 var modulesListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List available scan modules",
@@ -608,6 +616,17 @@ var modulesListCmd = &cobra.Command{
 		all := reg.All()
 		sort.Slice(all, func(i, j int) bool { return all[i].Name() < all[j].Name() })
 
+		asJSON, _ := cmd.Flags().GetBool("json")
+		if asJSON {
+			infos := make([]moduleInfo, 0, len(all))
+			for _, m := range all {
+				infos = append(infos, moduleInfo{Name: m.Name(), Description: m.Description()})
+			}
+			enc := json.NewEncoder(cmd.OutOrStdout())
+			enc.SetIndent("", "  ")
+			return enc.Encode(infos)
+		}
+
 		fmt.Println("Available modules:")
 		for _, m := range all {
 			fmt.Printf("  %-12s %s\n", m.Name(), m.Description())
@@ -617,6 +636,7 @@ var modulesListCmd = &cobra.Command{
 }
 
 func init() {
+	modulesListCmd.Flags().Bool("json", false, "Output as JSON")
 	modulesCmd.AddCommand(modulesListCmd)
 }
 

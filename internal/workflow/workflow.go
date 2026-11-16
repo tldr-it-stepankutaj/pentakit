@@ -573,15 +573,16 @@ var PredefinedWorkflows = map[string]*Workflow{
 			"default_ports": "21,22,23,25,53,80,110,135,139,143,443,445,993,995,1433,3306,3389,5432,8080,8443",
 		},
 		Steps: []Step{
-			// Both steps reference the same ${default_ports} variable rather
-			// than each hard-coding its own port list: the service detection
-			// step needs the exact same ports the port scan just probed, or
-			// it has nothing to detect services on (see "no ports specified").
 			{ID: "recon", Name: "Port Scan", Module: "recon", Config: map[string]interface{}{
 				"ports": "${default_ports}",
 			}},
+			// Service Detection scans whatever ports Port Scan actually
+			// found open (chained via "${recon.output}", resolved to
+			// recon's real []recon.Result — see cfgPorts), rather than
+			// duplicating ${default_ports} and re-probing the full list a
+			// second time regardless of what was actually open.
 			{ID: "services", Name: "Service Detection", Module: "services", DependsOn: []string{"recon"}, Config: map[string]interface{}{
-				"ports":       "${default_ports}",
+				"ports":       "${recon.output}",
 				"grab_banner": true,
 			}},
 			{ID: "http", Name: "HTTP Analysis", Module: "http", DependsOn: []string{"services"}, Condition: "services.found_count > 0", Config: map[string]interface{}{
@@ -613,13 +614,13 @@ var PredefinedWorkflows = map[string]*Workflow{
 			"full_scan_ports": "1-1000",
 		},
 		Steps: []Step{
-			// Same reasoning as quick-recon: Service Detection needs the
-			// ports Port Scan just probed, or it has nothing to work with.
 			{ID: "recon", Name: "Port Scan", Module: "recon", Config: map[string]interface{}{
 				"ports": "${full_scan_ports}",
 			}},
+			// Chained from recon's own findings — see the same note on
+			// quick-recon's services step above.
 			{ID: "services", Name: "Service Detection", Module: "services", DependsOn: []string{"recon"}, Config: map[string]interface{}{
-				"ports": "${full_scan_ports}",
+				"ports": "${recon.output}",
 			}},
 			{ID: "dns", Name: "DNS Enumeration", Module: "dns", Parallel: true, Config: map[string]interface{}{
 				"bruteforce":    true,

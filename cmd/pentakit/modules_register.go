@@ -39,11 +39,11 @@ func registerWorkflowModules() {
 			Ports:   cfgPorts(cfg, "ports"),
 			Timeout: cfgDuration(cfg, "timeout", appCtx.Config.Timeout),
 		}
-		// recon.Run reports findings via stdout/JSONL/markdown as a side
-		// effect and returns no result value, so there is nothing to hand
-		// back as `output` here beyond the error.
-		err := recon.Run(withCtx(appCtx, ctx), runCfg)
-		return nil, err
+		// recon.Run's own return value lets a later step chain off the
+		// ports it actually found open via "${recon.output}" in its own
+		// config (see cfgPorts' []recon.Result case) instead of every step
+		// having to be handed the same hard-coded port list independently.
+		return recon.Run(withCtx(appCtx, ctx), runCfg)
 	})
 
 	workflow.RegisterModule("services", func(ctx context.Context, appCtx app.Context, cfg map[string]interface{}) (interface{}, error) {
@@ -249,9 +249,12 @@ func stringSliceFrom(v interface{}) []string {
 }
 
 // cfgPorts reads a port list given as a native []int (Go literal), a
-// []interface{} of numbers (YAML/JSON decoded), or a string such as
-// "1-1000" or "22,80,443,1000-2000" (as used by the full-assessment
-// predefined workflow and documented for the `recon --ports` CLI flag).
+// []interface{} of numbers (YAML/JSON decoded), a string such as "1-1000"
+// or "22,80,443,1000-2000" (as used by the full-assessment predefined
+// workflow and documented for the `recon --ports` CLI flag), or the actual
+// []recon.Result a dependent step gets by referencing "${recon.output}" —
+// deduplicated and in the order first seen, since the same port can appear
+// once per host scanned.
 func cfgPorts(cfg map[string]interface{}, key string) []int {
 	v, ok := cfg[key]
 	if !ok {
@@ -273,6 +276,16 @@ func cfgPorts(cfg map[string]interface{}, key string) []int {
 		return out
 	case string:
 		return parsePortSpec(s)
+	case []recon.Result:
+		seen := make(map[int]bool, len(s))
+		out := make([]int, 0, len(s))
+		for _, r := range s {
+			if !seen[r.Port] {
+				seen[r.Port] = true
+				out = append(out, r.Port)
+			}
+		}
+		return out
 	}
 	return nil
 }
