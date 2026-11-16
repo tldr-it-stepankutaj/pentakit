@@ -1,18 +1,15 @@
 package ssl
 
 import (
-	"bufio"
 	"crypto/tls"
 	"crypto/x509"
-	"encoding/json"
 	"fmt"
 	"net"
-	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/tldr-it-stepankutaj/pentakit/internal/app"
+	"github.com/tldr-it-stepankutaj/pentakit/internal/fsutil"
 )
 
 // Module implements the SSL/TLS analysis module metadata.
@@ -200,7 +197,7 @@ func Run(ctx app.Context, cfg RunConfig) (*Result, error) {
 	// Persist results
 	timestamp := ctx.Now.Format("20060102-150405")
 	jsonPath := ctx.Workspace.Path("findings", fmt.Sprintf("ssl-%s-%d-%s.json", cfg.Target, cfg.Port, timestamp))
-	if err := writeJSON(jsonPath, result); err != nil {
+	if err := fsutil.WriteJSON(jsonPath, result); err != nil {
 		fmt.Printf("[!] failed to write findings: %v\n", err)
 	}
 
@@ -451,23 +448,4 @@ func tlsVersionName(version uint16) string {
 	default:
 		return fmt.Sprintf("Unknown (0x%04x)", version)
 	}
-}
-
-func writeJSON(path string, result *Result) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
-	f, err := os.Create(path)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = f.Close() }()
-
-	w := bufio.NewWriter(f)
-	enc := json.NewEncoder(w)
-	enc.SetIndent("", "  ")
-	if err := enc.Encode(result); err != nil {
-		return err
-	}
-	return w.Flush()
 }

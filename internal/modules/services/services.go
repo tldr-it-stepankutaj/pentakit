@@ -1,13 +1,9 @@
 package services
 
 import (
-	"bufio"
 	"context"
-	"encoding/json"
 	"fmt"
 	"net"
-	"os"
-	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
@@ -15,6 +11,7 @@ import (
 	"time"
 
 	"github.com/tldr-it-stepankutaj/pentakit/internal/app"
+	"github.com/tldr-it-stepankutaj/pentakit/internal/fsutil"
 )
 
 // Module implements the service detection module metadata.
@@ -75,6 +72,31 @@ var signatures = []ServiceSignature{
 	{Name: "Elasticsearch", Pattern: regexp.MustCompile(`"cluster_name"|elasticsearch`), Version: regexp.MustCompile(`"number"\s*:\s*"([\d.]+)"`)},
 	{Name: "Docker", Pattern: regexp.MustCompile(`Docker|docker`), Version: regexp.MustCompile(`Docker/([\d.]+)`)},
 	{Name: "Kubernetes", Pattern: regexp.MustCompile(`kubernetes|k8s`), Version: nil},
+}
+
+// maxBannerWait caps how long detectService waits for a banner/probe
+// response, independent of the (potentially much longer) connect timeout.
+//
+// Root cause of a real slowdown this fixes: some services (notably
+// PostgreSQL's wire protocol) never send anything unprompted — the client
+// is expected to speak first — so a wait keyed to the overall operation
+// timeout (here, the CLI's --timeout, 30s by default) spent the full 30s
+// blocked on a single conn.Read that was never going to return data,
+// *per port*, regardless of how many ports were actually being scanned.
+// Capping the banner/probe wait (but not the connect timeout itself, which
+// legitimately benefits from being long on slow/firewalled networks) turns
+// that into a few seconds for any such service, generically — not just
+// PostgreSQL.
+const maxBannerWait = 3 * time.Second
+
+// bannerDeadline returns the deadline to use for a single banner-read or
+// probe-read: timeout itself if it's already short, otherwise capped to
+// maxBannerWait. An explicitly short --timeout is still honored as-is.
+func bannerDeadline(timeout time.Duration) time.Duration {
+	if timeout <= 0 || timeout > maxBannerWait {
+		return maxBannerWait
+	}
+	return timeout
 }
 
 // PortServiceHint maps common ports to likely services.
@@ -158,7 +180,7 @@ func Run(ctx app.Context, cfg RunConfig) ([]Result, error) {
 		if r.Version != "" {
 			fmt.Printf("%s:%d %s %s (%s)\n", r.Host, r.Port, r.Service, r.Version, r.Banner)
 		} else if r.Banner != "" {
-			fmt.Printf("%s:%d %s (%s)\n", r.Host, r.Port, r.Service, truncate(r.Banner, 60))
+			fmt.Printf("%s:%d %s (%s)\n", r.Host, r.Port, r.Service, fsutil.Truncate(r.Banner, 60))
 		} else {
 			fmt.Printf("%s:%d %s\n", r.Host, r.Port, r.Service)
 		}
@@ -167,7 +189,7 @@ func Run(ctx app.Context, cfg RunConfig) ([]Result, error) {
 	// Persist results
 	timestamp := ctx.Now.Format("20060102-150405")
 	jsonlPath := ctx.Workspace.Path("findings", fmt.Sprintf("services-%s.jsonl", timestamp))
-	if err := writeJSONL(jsonlPath, results); err != nil {
+	if err := fsutil.WriteJSONL(jsonlPath, results); err != nil {
 		fmt.Printf("[!] failed to write findings: %v\n", err)
 	}
 
@@ -206,7 +228,7 @@ func detectService(ctx context.Context, host string, port int, timeout time.Dura
 	}
 
 	// Try to grab banner
-	banner := grabBannerFromConn(conn, timeout)
+	banner := grabBannerFromConn(conn, bannerDeadline(timeout))
 	if banner != "" {
 		result.Banner = banner
 
@@ -234,7 +256,7 @@ func detectService(ctx context.Context, host string, port int, timeout time.Dura
 
 	// Send probes for services that don't send banner first
 	if result.Confidence < 50 {
-		probedBanner := sendProbes(conn, timeout)
+		probedBanner := sendProbes(conn, bannerDeadline(timeout))
 		if probedBanner != "" && probedBanner != banner {
 			result.Banner = probedBanner
 			for _, sig := range signatures {
@@ -280,8 +302,14 @@ func sendProbes(conn net.Conn, timeout time.Duration) string {
 		[]byte("\r\n"),
 	}
 
+	// One shared deadline for the whole probe sequence, not one full
+	// `timeout` per probe: against a service that never responds to any of
+	// them, resetting the deadline each iteration would make the 3 probes
+	// take up to 3x `timeout` in total instead of up to `timeout` overall.
+	deadline := time.Now().Add(timeout)
+
 	for _, probe := range probes {
-		if err := conn.SetWriteDeadline(time.Now().Add(timeout)); err != nil {
+		if err := conn.SetWriteDeadline(deadline); err != nil {
 			continue
 		}
 		_, err := conn.Write(probe)
@@ -289,13 +317,16 @@ func sendProbes(conn net.Conn, timeout time.Duration) string {
 			continue
 		}
 
-		if err := conn.SetReadDeadline(time.Now().Add(timeout)); err != nil {
+		if err := conn.SetReadDeadline(deadline); err != nil {
 			continue
 		}
 		buf := make([]byte, 4096)
 		n, err := conn.Read(buf)
 		if err == nil && n > 0 {
 			return sanitizeBanner(string(buf[:n]))
+		}
+		if time.Now().After(deadline) {
+			break
 		}
 	}
 	return ""
@@ -310,34 +341,4 @@ func sanitizeBanner(s string) string {
 		}
 	}
 	return strings.TrimSpace(result.String())
-}
-
-func truncate(s string, maxLen int) string {
-	s = strings.ReplaceAll(s, "\n", " ")
-	s = strings.ReplaceAll(s, "\r", "")
-	if len(s) > maxLen {
-		return s[:maxLen] + "..."
-	}
-	return s
-}
-
-func writeJSONL(path string, results []Result) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
-	// Use append mode so multiple calls don't overwrite
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = f.Close() }()
-
-	w := bufio.NewWriter(f)
-	enc := json.NewEncoder(w)
-	for _, r := range results {
-		if err := enc.Encode(r); err != nil {
-			return err
-		}
-	}
-	return w.Flush()
 }

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"sync"
@@ -252,6 +253,23 @@ func executeStep(execCtx *ExecutionContext, step Step) *StepResult {
 	// Resolve config variables
 	config := resolveConfig(execCtx, step.Config)
 
+	// Steps rarely spell out "target"/"domain" explicitly (the predefined
+	// workflows and the README's own example never do) — they rely on the
+	// workflow-level target (set via `workflow run --target` or a workflow's
+	// `variables`) reaching every step automatically. Inject it here, once,
+	// rather than requiring every module adapter to reach into
+	// execCtx.Variables itself.
+	if _, ok := config["target"]; !ok {
+		if t, ok := execCtx.Variables["target"].(string); ok && t != "" {
+			config["target"] = t
+		}
+	}
+	if _, ok := config["domain"]; !ok {
+		if d, ok := execCtx.Variables["domain"].(string); ok && d != "" {
+			config["domain"] = d
+		}
+	}
+
 	// Execute with retries
 	var output interface{}
 	var err error
@@ -436,10 +454,20 @@ func buildDependencyGraph(steps []Step) map[string][]string {
 	return graph
 }
 
+// countFindings derives a "found" count from a module's result for display
+// and for `condition` checks like "services.found_count > 0". Module Run
+// functions return a mix of concrete types — []recon.Result, []http.Result,
+// *ssl.Result, *smb.Result, ... — never the []interface{}/map[string]interface{}
+// shapes the original switch-only version expected, so every one of them
+// used to silently fall through to 0 regardless of how many findings a step
+// actually produced. Reflection handles any slice (by length) and any
+// pointer (1 if non-nil, 0 if nil) generically, on top of the few shapes a
+// hand-built module runner might reasonably return directly.
 func countFindings(output interface{}) int {
+	if output == nil {
+		return 0
+	}
 	switch v := output.(type) {
-	case []interface{}:
-		return len(v)
 	case map[string]interface{}:
 		if count, ok := v["count"].(int); ok {
 			return count
@@ -447,6 +475,17 @@ func countFindings(output interface{}) int {
 		return 1
 	case int:
 		return v
+	}
+
+	rv := reflect.ValueOf(output)
+	switch rv.Kind() {
+	case reflect.Slice, reflect.Array:
+		return rv.Len()
+	case reflect.Pointer:
+		if rv.IsNil() {
+			return 0
+		}
+		return 1
 	default:
 		return 0
 	}
@@ -530,11 +569,20 @@ var PredefinedWorkflows = map[string]*Workflow{
 	"quick-recon": {
 		Name:        "Quick Reconnaissance",
 		Description: "Fast reconnaissance workflow for initial target assessment",
+		Variables: map[string]string{
+			"default_ports": "21,22,23,25,53,80,110,135,139,143,443,445,993,995,1433,3306,3389,5432,8080,8443",
+		},
 		Steps: []Step{
 			{ID: "recon", Name: "Port Scan", Module: "recon", Config: map[string]interface{}{
-				"ports": []int{21, 22, 23, 25, 53, 80, 110, 135, 139, 143, 443, 445, 993, 995, 1433, 3306, 3389, 5432, 8080, 8443},
+				"ports": "${default_ports}",
 			}},
+			// Service Detection scans whatever ports Port Scan actually
+			// found open (chained via "${recon.output}", resolved to
+			// recon's real []recon.Result — see cfgPorts), rather than
+			// duplicating ${default_ports} and re-probing the full list a
+			// second time regardless of what was actually open.
 			{ID: "services", Name: "Service Detection", Module: "services", DependsOn: []string{"recon"}, Config: map[string]interface{}{
+				"ports":       "${recon.output}",
 				"grab_banner": true,
 			}},
 			{ID: "http", Name: "HTTP Analysis", Module: "http", DependsOn: []string{"services"}, Condition: "services.found_count > 0", Config: map[string]interface{}{
@@ -562,11 +610,18 @@ var PredefinedWorkflows = map[string]*Workflow{
 	"full-assessment": {
 		Name:        "Full Infrastructure Assessment",
 		Description: "Complete infrastructure security assessment workflow",
+		Variables: map[string]string{
+			"full_scan_ports": "1-1000",
+		},
 		Steps: []Step{
 			{ID: "recon", Name: "Port Scan", Module: "recon", Config: map[string]interface{}{
-				"ports": "1-1000",
+				"ports": "${full_scan_ports}",
 			}},
-			{ID: "services", Name: "Service Detection", Module: "services", DependsOn: []string{"recon"}},
+			// Chained from recon's own findings — see the same note on
+			// quick-recon's services step above.
+			{ID: "services", Name: "Service Detection", Module: "services", DependsOn: []string{"recon"}, Config: map[string]interface{}{
+				"ports": "${recon.output}",
+			}},
 			{ID: "dns", Name: "DNS Enumeration", Module: "dns", Parallel: true, Config: map[string]interface{}{
 				"bruteforce":    true,
 				"zone_transfer": true,

@@ -22,9 +22,13 @@ profile.cov
 bin/
 work/
 
-# Built binaries
-pentakit
-pentakit-*
+# Built binaries (repo-root only — an unanchored pattern here would also
+# match, and silently git-ignore, the cmd/pentakit/ source directory and
+# everything ever added to it since; `bin/` above already covers `make build`'s
+# actual output, this guards only a stray `go build -o pentakit ./cmd/main`
+# run from the repo root)
+/pentakit
+/pentakit-*
 # Go workspace file
 go.work
 go.work.sum

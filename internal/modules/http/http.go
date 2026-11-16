@@ -1,16 +1,12 @@
 package http
 
 import (
-	"bufio"
 	"context"
 	"crypto/tls"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
-	"os"
-	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
@@ -18,6 +14,7 @@ import (
 	"time"
 
 	"github.com/tldr-it-stepankutaj/pentakit/internal/app"
+	"github.com/tldr-it-stepankutaj/pentakit/internal/fsutil"
 )
 
 // Module implements the HTTP enumeration module metadata.
@@ -211,7 +208,7 @@ func Run(ctx app.Context, cfg RunConfig) ([]Result, error) {
 
 		wordlist := DefaultWordlist
 		if cfg.Wordlist != "" {
-			if wl, err := loadWordlist(cfg.Wordlist); err == nil {
+			if wl, err := fsutil.LoadWordlist(cfg.Wordlist); err == nil {
 				wordlist = wl
 			} else {
 				fmt.Printf("[!] Failed to load wordlist: %v, using default\n", err)
@@ -234,7 +231,7 @@ func Run(ctx app.Context, cfg RunConfig) ([]Result, error) {
 	// Persist results
 	timestamp := ctx.Now.Format("20060102-150405")
 	jsonlPath := ctx.Workspace.Path("findings", fmt.Sprintf("http-%s.jsonl", timestamp))
-	if err := writeJSONL(jsonlPath, allResults); err != nil {
+	if err := fsutil.WriteJSONL(jsonlPath, allResults); err != nil {
 		fmt.Printf("[!] failed to write findings: %v\n", err)
 	}
 
@@ -551,7 +548,7 @@ wordLoop:
 			if result.RedirectURL != "" {
 				extra = fmt.Sprintf(" -> %s", result.RedirectURL)
 			} else if result.Title != "" {
-				extra = fmt.Sprintf(" [%s]", truncate(result.Title, 30))
+				extra = fmt.Sprintf(" [%s]", fsutil.Truncate(result.Title, 30))
 			}
 
 			fmt.Printf("[%s] %s (size: %d)%s\n", statusColor, testURL, resp.ContentLength, extra)
@@ -578,50 +575,4 @@ func expandWordlist(words []string, extensions []string) []string {
 		}
 	}
 	return expanded
-}
-
-func loadWordlist(path string) ([]string, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = f.Close() }()
-
-	var words []string
-	scanner := bufio.NewScanner(f)
-	for scanner.Scan() {
-		word := strings.TrimSpace(scanner.Text())
-		if word != "" && !strings.HasPrefix(word, "#") {
-			words = append(words, word)
-		}
-	}
-	return words, scanner.Err()
-}
-
-func truncate(s string, maxLen int) string {
-	if len(s) > maxLen {
-		return s[:maxLen] + "..."
-	}
-	return s
-}
-
-func writeJSONL(path string, results []Result) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
-	// Use append mode so multiple calls don't overwrite
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = f.Close() }()
-
-	w := bufio.NewWriter(f)
-	enc := json.NewEncoder(w)
-	for _, r := range results {
-		if err := enc.Encode(r); err != nil {
-			return err
-		}
-	}
-	return w.Flush()
 }

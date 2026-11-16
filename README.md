@@ -1,5 +1,12 @@
 # Pentakit
 
+[![CI](https://github.com/tldr-it-stepankutaj/pentakit/actions/workflows/ci.yml/badge.svg)](https://github.com/tldr-it-stepankutaj/pentakit/actions/workflows/ci.yml)
+[![Release](https://github.com/tldr-it-stepankutaj/pentakit/actions/workflows/release.yml/badge.svg)](https://github.com/tldr-it-stepankutaj/pentakit/actions/workflows/release.yml)
+[![Latest release](https://img.shields.io/github/v/release/tldr-it-stepankutaj/pentakit)](https://github.com/tldr-it-stepankutaj/pentakit/releases/latest)
+[![Go Report Card](https://goreportcard.com/badge/github.com/tldr-it-stepankutaj/pentakit)](https://goreportcard.com/report/github.com/tldr-it-stepankutaj/pentakit)
+[![Go version](https://img.shields.io/github/go-mod/go-version/tldr-it-stepankutaj/pentakit)](go.mod)
+[![License](https://img.shields.io/github/license/tldr-it-stepankutaj/pentakit)](LICENSE)
+
 Pentakit is an extensible **Go-based penetration testing toolkit**.
 It provides a modular CLI and an interactive TUI (`--tui`) to automate repeatable pentest workflows such as reconnaissance, enumeration, vulnerability scanning, and evidence collection.
 
@@ -21,12 +28,17 @@ It provides a modular CLI and an interactive TUI (`--tui`) to automate repeatabl
 
 ### Vulnerability Scanning
 - **Nuclei Integration**: Wrapper for ProjectDiscovery's Nuclei scanner with template management
-- **Authentication Testing**: Brute-force attacks, password spraying, default credential checking
+- **Authentication Testing**: Brute-force attacks, password spraying, default credential checking (HTTP, FTP, SSH with real credential verification, SMTP)
 
 ### Workflow & Automation
 - **Workflow Engine**: YAML-based workflow definitions with dependency management
 - **Predefined Workflows**: Quick-recon, web-assessment, full-assessment
 - **Parallel Execution**: Run independent modules concurrently
+- **Step Chaining**: Pass a step's results into a dependent step's config (e.g. `${recon.output}` feeds discovered open ports straight into `services`)
+- **Module Registry**: `modules list` (with `--json`) introspects every registered module and its description
+
+### Diagnostics
+- `pentakit modules list` / `pentakit modules list --json` — enumerate available modules for scripting or workflow authoring
 
 ### Reporting
 - **Multiple Formats**: JSON, Markdown, HTML export
@@ -42,8 +54,9 @@ It provides a modular CLI and an interactive TUI (`--tui`) to automate repeatabl
 - **CLI**: Full-featured command-line interface with Cobra
 - **TUI**: Interactive terminal UI with Bubble Tea
   - DNS-first workflow: Enter domain → DNS enumeration → Select targets → Run scans
-  - Real-time progress display
-  - Target selection with checkboxes
+  - Scans run in the background with a live spinner and a responsive UI — the interface never freezes during a scan, and `q`/`Ctrl+C` can cancel out at any time
+  - Target selection with checkboxes, listed in a stable, sorted order
+  - Success/failure counts reported after each scan, not just a bare total
 
 ---
 
@@ -220,6 +233,9 @@ The HTML report includes:
 
 # Single credential test
 ./bin/pentakit bruteforce --target example.com --protocol ftp --user admin --password admin
+
+# SSH credential testing (real handshake-based verification)
+./bin/pentakit bruteforce --target 192.168.1.10 --protocol ssh --users users.txt --passwords passwords.txt
 ```
 
 ### SMB Enumeration
@@ -258,6 +274,16 @@ The HTML report includes:
 ./bin/pentakit workflow run --file my-workflow.yaml --target 192.168.1.10
 ```
 
+### Modules
+
+```bash
+# List all registered modules
+./bin/pentakit modules list
+
+# Machine-readable output
+./bin/pentakit modules list --json
+```
+
 ---
 
 ## Workflow Definition (YAML)
@@ -282,6 +308,7 @@ steps:
     module: services
     depends_on: [recon]
     config:
+      ports: "${recon.output}" # chains the ports recon actually found open
       grab_banner: true
 
   - id: http
