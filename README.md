@@ -1,5 +1,12 @@
 # Pentakit
 
+[![CI](https://github.com/tldr-it-stepankutaj/pentakit/actions/workflows/ci.yml/badge.svg)](https://github.com/tldr-it-stepankutaj/pentakit/actions/workflows/ci.yml)
+[![Release](https://github.com/tldr-it-stepankutaj/pentakit/actions/workflows/release.yml/badge.svg)](https://github.com/tldr-it-stepankutaj/pentakit/actions/workflows/release.yml)
+[![Latest release](https://img.shields.io/github/v/release/tldr-it-stepankutaj/pentakit)](https://github.com/tldr-it-stepankutaj/pentakit/releases/latest)
+[![Go Report Card](https://goreportcard.com/badge/github.com/tldr-it-stepankutaj/pentakit)](https://goreportcard.com/report/github.com/tldr-it-stepankutaj/pentakit)
+[![Go version](https://img.shields.io/github/go-mod/go-version/tldr-it-stepankutaj/pentakit)](go.mod)
+[![License](https://img.shields.io/github/license/tldr-it-stepankutaj/pentakit)](LICENSE)
+
 Pentakit is an extensible **Go-based penetration testing toolkit**.
 It provides a modular CLI and an interactive TUI (`--tui`) to automate repeatable pentest workflows such as reconnaissance, enumeration, vulnerability scanning, and evidence collection.
 

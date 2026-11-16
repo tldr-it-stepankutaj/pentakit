@@ -1,9 +1,7 @@
 package recon
 
 import (
-	"bufio"
 	"context"
-	"encoding/json"
 	"fmt"
 	"net"
 	"os"
@@ -14,6 +12,7 @@ import (
 	"time"
 
 	"github.com/tldr-it-stepankutaj/pentakit/internal/app"
+	"github.com/tldr-it-stepankutaj/pentakit/internal/fsutil"
 )
 
 // Module implements the basic recon module metadata.
@@ -155,7 +154,7 @@ func Run(ctx app.Context, cfg RunConfig) error {
 	// Persist results to workspace.
 	timestamp := ctx.Now.Format("20060102-150405")
 	jsonlPath := ctx.Workspace.Path("findings", fmt.Sprintf("recon-%s.jsonl", timestamp))
-	if err := writeJSONL(jsonlPath, all); err != nil {
+	if err := fsutil.WriteJSONL(jsonlPath, all); err != nil {
 		fmt.Printf("[!] failed to write findings JSONL: %v\n", err)
 	}
 
@@ -207,31 +206,6 @@ func probe(ctx context.Context, host string, ports []int, dialTimeout time.Durat
 	}
 	wg.Wait()
 	return out, nil
-}
-
-// writeJSONL writes results into a JSONL file.
-func writeJSONL(path string, results []Result) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
-	f, err := os.Create(path)
-	if err != nil {
-		return err
-	}
-	defer func(f *os.File) {
-		if cerr := f.Close(); cerr != nil {
-			fmt.Printf("[!] %s: %v\n", path, cerr)
-		}
-	}(f)
-
-	w := bufio.NewWriter(f)
-	enc := json.NewEncoder(w)
-	for _, r := range results {
-		if err := enc.Encode(r); err != nil {
-			return err
-		}
-	}
-	return w.Flush()
 }
 
 // ReportData is the data model passed to the markdown template.

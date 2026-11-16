@@ -1,13 +1,9 @@
 package services
 
 import (
-	"bufio"
 	"context"
-	"encoding/json"
 	"fmt"
 	"net"
-	"os"
-	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
@@ -15,6 +11,7 @@ import (
 	"time"
 
 	"github.com/tldr-it-stepankutaj/pentakit/internal/app"
+	"github.com/tldr-it-stepankutaj/pentakit/internal/fsutil"
 )
 
 // Module implements the service detection module metadata.
@@ -158,7 +155,7 @@ func Run(ctx app.Context, cfg RunConfig) ([]Result, error) {
 		if r.Version != "" {
 			fmt.Printf("%s:%d %s %s (%s)\n", r.Host, r.Port, r.Service, r.Version, r.Banner)
 		} else if r.Banner != "" {
-			fmt.Printf("%s:%d %s (%s)\n", r.Host, r.Port, r.Service, truncate(r.Banner, 60))
+			fmt.Printf("%s:%d %s (%s)\n", r.Host, r.Port, r.Service, fsutil.Truncate(r.Banner, 60))
 		} else {
 			fmt.Printf("%s:%d %s\n", r.Host, r.Port, r.Service)
 		}
@@ -167,7 +164,7 @@ func Run(ctx app.Context, cfg RunConfig) ([]Result, error) {
 	// Persist results
 	timestamp := ctx.Now.Format("20060102-150405")
 	jsonlPath := ctx.Workspace.Path("findings", fmt.Sprintf("services-%s.jsonl", timestamp))
-	if err := writeJSONL(jsonlPath, results); err != nil {
+	if err := fsutil.WriteJSONL(jsonlPath, results); err != nil {
 		fmt.Printf("[!] failed to write findings: %v\n", err)
 	}
 
@@ -310,34 +307,4 @@ func sanitizeBanner(s string) string {
 		}
 	}
 	return strings.TrimSpace(result.String())
-}
-
-func truncate(s string, maxLen int) string {
-	s = strings.ReplaceAll(s, "\n", " ")
-	s = strings.ReplaceAll(s, "\r", "")
-	if len(s) > maxLen {
-		return s[:maxLen] + "..."
-	}
-	return s
-}
-
-func writeJSONL(path string, results []Result) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
-	// Use append mode so multiple calls don't overwrite
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = f.Close() }()
-
-	w := bufio.NewWriter(f)
-	enc := json.NewEncoder(w)
-	for _, r := range results {
-		if err := enc.Encode(r); err != nil {
-			return err
-		}
-	}
-	return w.Flush()
 }

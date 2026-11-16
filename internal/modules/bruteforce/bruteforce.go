@@ -5,20 +5,18 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/base64"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"net/url"
-	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/tldr-it-stepankutaj/pentakit/internal/app"
+	"github.com/tldr-it-stepankutaj/pentakit/internal/fsutil"
 )
 
 // Module implements the authentication testing module metadata.
@@ -145,7 +143,7 @@ func Run(ctx app.Context, cfg RunConfig) ([]Result, error) {
 	// Load user list
 	users := cfg.UserList
 	if cfg.UserFile != "" {
-		fileUsers, err := loadWordlist(cfg.UserFile)
+		fileUsers, err := fsutil.LoadWordlist(cfg.UserFile)
 		if err != nil {
 			return nil, fmt.Errorf("failed to load user file: %w", err)
 		}
@@ -161,7 +159,7 @@ func Run(ctx app.Context, cfg RunConfig) ([]Result, error) {
 	// Load password list
 	passwords := cfg.PassList
 	if cfg.PassFile != "" {
-		filePass, err := loadWordlist(cfg.PassFile)
+		filePass, err := fsutil.LoadWordlist(cfg.PassFile)
 		if err != nil {
 			return nil, fmt.Errorf("failed to load password file: %w", err)
 		}
@@ -232,6 +230,7 @@ func Run(ctx app.Context, cfg RunConfig) ([]Result, error) {
 
 	stopChan := make(chan struct{})
 	stopped := false
+	var closeStopOnce sync.Once
 
 	for _, pair := range pairs {
 		select {
@@ -288,8 +287,12 @@ func Run(ctx app.Context, cfg RunConfig) ([]Result, error) {
 				fmt.Printf("[+] SUCCESS: %s:%s\n", user, displayPass)
 
 				if cfg.StopOnSuccess {
-					close(stopChan)
-					stopped = true
+					// Closing stopChan is the actual signal: the dispatch
+					// loop below observes it via its own `select` on the
+					// next iteration. Writing to `stopped` here too used to
+					// race with that same loop reading/writing it from the
+					// main goroutine with no synchronization.
+					closeStopOnce.Do(func() { close(stopChan) })
 				}
 			} else {
 				atomic.AddInt64(&stats.FailedCount, 1)
@@ -316,7 +319,7 @@ func Run(ctx app.Context, cfg RunConfig) ([]Result, error) {
 	if len(results) > 0 {
 		timestamp := ctx.Now.Format("20060102-150405")
 		jsonlPath := ctx.Workspace.Path("findings", fmt.Sprintf("credentials-%s.jsonl", timestamp))
-		if err := writeJSONL(jsonlPath, results); err != nil {
+		if err := fsutil.WriteJSONL(jsonlPath, results); err != nil {
 			fmt.Printf("[!] failed to write findings: %v\n", err)
 		}
 	}
@@ -655,42 +658,4 @@ func TestDefaultCredentials(ctx app.Context, target string, port int, protocol s
 	cfg.PassList = passwords
 
 	return Run(ctx, cfg)
-}
-
-func loadWordlist(path string) ([]string, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = f.Close() }()
-
-	var words []string
-	scanner := bufio.NewScanner(f)
-	for scanner.Scan() {
-		word := scanner.Text()
-		if word != "" {
-			words = append(words, word)
-		}
-	}
-	return words, scanner.Err()
-}
-
-func writeJSONL(path string, results []Result) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
-	f, err := os.Create(path)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = f.Close() }()
-
-	w := bufio.NewWriter(f)
-	enc := json.NewEncoder(w)
-	for _, r := range results {
-		if err := enc.Encode(r); err != nil {
-			return err
-		}
-	}
-	return w.Flush()
 }

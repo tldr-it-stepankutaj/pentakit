@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -70,6 +71,11 @@ func init() {
 	viper.SetEnvPrefix("PENTAKIT")
 	viper.AutomaticEnv()
 
+	// Wire concrete modules into the workflow engine's generic registry
+	// (see modules_register.go) — without this, `workflow run` cannot find
+	// any module by name.
+	registerWorkflowModules()
+
 	// Register subcommands.
 	rootCmd.AddCommand(initCmd)
 	rootCmd.AddCommand(reconCmd)
@@ -82,6 +88,7 @@ func init() {
 	rootCmd.AddCommand(smbCmd)
 	rootCmd.AddCommand(snmpCmd)
 	rootCmd.AddCommand(workflowCmd)
+	rootCmd.AddCommand(modulesCmd)
 	rootCmd.AddCommand(reportCmd)
 	rootCmd.AddCommand(versionCmd)
 }
@@ -135,9 +142,6 @@ var reconCmd = &cobra.Command{
 			ports = []int{21, 22, 23, 25, 53, 80, 110, 135, 139, 143, 443, 445, 993, 995, 1433, 3306, 3389, 5432, 8080, 8443}
 		}
 		timeout := viper.GetDuration("timeout")
-
-		reg := modules.NewRegistry()
-		reg.Register(recon.New())
 
 		runCfg := recon.RunConfig{
 			Target:  target,
@@ -570,6 +574,50 @@ func init() {
 
 	workflowCmd.AddCommand(workflowRunCmd)
 	workflowCmd.AddCommand(workflowListCmd)
+}
+
+// `modules` subcommand: lists every module the CLI/workflow engine knows
+// about, by name and description — the one consumer of internal/modules'
+// Registry type. Every module's Module/New()/Name()/Description() existed
+// purely to satisfy that interface, but until now nothing ever asked a
+// Registry for its modules (the one call site, inside `recon`, built a
+// registry with exactly one module in it and then never consulted it).
+var modulesCmd = &cobra.Command{
+	Use:   "modules",
+	Short: "Inspect available scan modules",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return cmd.Help()
+	},
+}
+
+var modulesListCmd = &cobra.Command{
+	Use:   "list",
+	Short: "List available scan modules",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		reg := modules.NewRegistry()
+		reg.Register(recon.New())
+		reg.Register(services.New())
+		reg.Register(dns.New())
+		reg.Register(http.New())
+		reg.Register(ssl.New())
+		reg.Register(nuclei.New())
+		reg.Register(bruteforce.New())
+		reg.Register(smb.New())
+		reg.Register(snmp.New())
+
+		all := reg.All()
+		sort.Slice(all, func(i, j int) bool { return all[i].Name() < all[j].Name() })
+
+		fmt.Println("Available modules:")
+		for _, m := range all {
+			fmt.Printf("  %-12s %s\n", m.Name(), m.Description())
+		}
+		return nil
+	},
+}
+
+func init() {
+	modulesCmd.AddCommand(modulesListCmd)
 }
 
 // `report` subcommand: Generate reports from workspace data

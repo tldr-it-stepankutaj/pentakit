@@ -139,7 +139,7 @@ func (d *NetworkDiagram) GenerateSVG() string {
 	height := topMargin + (nodeHeight+subnetSpacing)*len(d.Subnets) + 100
 
 	// SVG header
-	sb.WriteString(fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
+	_, _ = fmt.Fprintf(&sb, `<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 %d %d" width="%d" height="%d">
 <style>
   .subnet { fill: #f0f4f8; stroke: #4a5568; stroke-width: 2; rx: 10; }
@@ -152,11 +152,11 @@ func (d *NetworkDiagram) GenerateSVG() string {
   .title { font-family: sans-serif; font-size: 20px; font-weight: bold; fill: #1a202c; }
   .legend { font-family: sans-serif; font-size: 11px; fill: #4a5568; }
 </style>
-`, width, height, width, height))
+`, width, height, width, height)
 
 	// Title
-	sb.WriteString(fmt.Sprintf(`<text x="%d" y="30" class="title">Network Topology Diagram</text>
-`, width/2-150))
+	_, _ = fmt.Fprintf(&sb, `<text x="%d" y="30" class="title">Network Topology Diagram</text>
+`, width/2-150)
 
 	// Legend
 	sb.WriteString(`<rect x="20" y="45" width="15" height="15" class="node gateway"/>
@@ -174,8 +174,8 @@ func (d *NetworkDiagram) GenerateSVG() string {
 		}
 
 		// Subnet box
-		sb.WriteString(fmt.Sprintf(`<rect x="%d" y="%d" width="%d" height="%d" class="subnet"/>
-`, leftMargin-10, y-10, nodesWidth, nodeHeight+40))
+		_, _ = fmt.Fprintf(&sb, `<rect x="%d" y="%d" width="%d" height="%d" class="subnet"/>
+`, leftMargin-10, y-10, nodesWidth, nodeHeight+40)
 
 		// Subnet label
 		sb.WriteString(fmt.Sprintf(`<text x="%d" y="%d" class="subnet-label">%s</text>

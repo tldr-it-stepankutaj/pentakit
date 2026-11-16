@@ -1,19 +1,16 @@
 package snmp
 
 import (
-	"bufio"
 	"encoding/asn1"
-	"encoding/json"
 	"fmt"
 	"net"
-	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/tldr-it-stepankutaj/pentakit/internal/app"
+	"github.com/tldr-it-stepankutaj/pentakit/internal/fsutil"
 )
 
 // Module implements the SNMP enumeration module metadata.
@@ -125,8 +122,7 @@ var DefaultCommunities = []string{
 	"read", "write", "manager", "admin", "cisco",
 	"router", "switch", "monitor", "security", "system",
 	"guest", "test", "secret", "internal", "external",
-	"ILMI", "TENmanUFactworworworworworworworworworworworworkworworworworworworwo",
-	"cable-docsis", "cable", "c0mmunity", "Publ1c",
+	"ILMI", "cable-docsis", "cable", "c0mmunity", "Publ1c",
 }
 
 // Run executes SNMP enumeration.
@@ -150,7 +146,7 @@ func Run(ctx app.Context, cfg RunConfig) (*Result, error) {
 	// Load community strings
 	communities := cfg.Communities
 	if cfg.CommunityFile != "" {
-		fileCommunities, err := loadWordlist(cfg.CommunityFile)
+		fileCommunities, err := fsutil.LoadWordlist(cfg.CommunityFile)
 		if err != nil {
 			fmt.Printf("[!] Failed to load community file: %v\n", err)
 		} else {
@@ -228,7 +224,7 @@ func Run(ctx app.Context, cfg RunConfig) (*Result, error) {
 	// Persist results
 	timestamp := ctx.Now.Format("20060102-150405")
 	jsonPath := ctx.Workspace.Path("findings", fmt.Sprintf("snmp-%s-%d-%s.json", cfg.Target, cfg.Port, timestamp))
-	if err := writeJSON(jsonPath, result); err != nil {
+	if err := fsutil.WriteJSON(jsonPath, result); err != nil {
 		fmt.Printf("[!] failed to write findings: %v\n", err)
 	}
 
@@ -536,41 +532,4 @@ func getInterfaces(target string, port int, community string, version int, timeo
 func getProcesses(target string, port int, community string, version int, timeout time.Duration) []ProcessInfo {
 	// Placeholder - full implementation would SNMP walk hrSWRunTable
 	return nil
-}
-
-func loadWordlist(path string) ([]string, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = f.Close() }()
-
-	var words []string
-	scanner := bufio.NewScanner(f)
-	for scanner.Scan() {
-		word := strings.TrimSpace(scanner.Text())
-		if word != "" && !strings.HasPrefix(word, "#") {
-			words = append(words, word)
-		}
-	}
-	return words, scanner.Err()
-}
-
-func writeJSON(path string, result *Result) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
-	f, err := os.Create(path)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = f.Close() }()
-
-	w := bufio.NewWriter(f)
-	enc := json.NewEncoder(w)
-	enc.SetIndent("", "  ")
-	if err := enc.Encode(result); err != nil {
-		return err
-	}
-	return w.Flush()
 }
